@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      var coverSupport = 'CSS' in window && typeof CSS.supports === 'function' && (CSS.supports('top: env(a)') || CSS.supports('top: constant(a)'))
+      document.write('<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0' + (coverSupport ? ', viewport-fit=cover' : '') + '" />')
+    </script>
+    <script>
+      // 抑制 passive event listener 警告（这些警告来自 Vue/uni-app 框架内部，不影响功能）
+      // 这些警告是浏览器性能建议，不是错误，可以安全忽略
+      (function() {
+        if (typeof console === 'undefined') return
+        
+        // 拦截所有 console 方法
+        var methods = ['warn', 'error', 'log', 'info']
+        var originalMethods = {}
+        
+        methods.forEach(function(method) {
+          if (console[method]) {
+            originalMethods[method] = console[method]
+            console[method] = function() {
+              // 检查是否包含 passive event listener 相关的警告
+              var message = arguments[0]
+              if (typeof message === 'string') {
+                var lowerMessage = message.toLowerCase()
+                if (lowerMessage.indexOf('non-passive event listener') !== -1 ||
+                    lowerMessage.indexOf('passive event listener') !== -1 ||
+                    lowerMessage.indexOf('scroll-blocking') !== -1 ||
+                    lowerMessage.indexOf('violation') !== -1) {
+                  return // 忽略这些警告
+                }
+              }
+              // 其他消息正常输出
+              originalMethods[method].apply(console, arguments)
+            }
+          }
+        })
+      })()
+    </script>
+    <title>Nomur微商管理</title>
+  </head>
+  <body>
+    <div id="app"><!--app-html--></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,55 @@
+// 主题色 - 蓝白配色
+$primary-color: #2563EB;
+$primary-light: #3B82F6;
+$primary-dark: #1D4ED8;
+
+// 功能色
+$success-color: #10B981;
+$warning-color: #F59E0B;
+$danger-color: #EF4444;
+$info-color: #3B82F6;
+
+// 文字颜色
+$text-primary: #1E293B;
+$text-secondary: #64748B;
+$text-placeholder: #94A3B8;
+$text-disabled: #CBD5E1;
+
+// 背景色 - 干净的白色系
+$bg-page: #F8FAFC;
+$bg-card: #FFFFFF;
+$bg-grey: #F1F5F9;
+$bg-hover: #F8FAFC;
+
+// 边框
+$border-color: #E5E7EB;
+$border-radius-sm: 8rpx;
+$border-radius: 12rpx;
+$border-radius-lg: 16rpx;
+$border-radius-xl: 24rpx;
+
+// 阴影
+$shadow-sm: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
+$shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.08);
+$shadow-lg: 0 8rpx 24rpx rgba(0, 0, 0, 0.12);
+
+// 间距
+$spacing-xs: 8rpx;
+$spacing-sm: 16rpx;
+$spacing: 24rpx;
+$spacing-lg: 32rpx;
+$spacing-xl: 48rpx;
+
+// 字体大小
+$font-size-xs: 22rpx;
+$font-size-sm: 24rpx;
+$font-size: 28rpx;
+$font-size-lg: 32rpx;
+$font-size-xl: 36rpx;
+$font-size-xxl: 48rpx;
+
+// 动画
+$transition-fast: 0.15s ease;
+$transition: 0.25s ease;
+$transition-slow: 0.35s ease;
+

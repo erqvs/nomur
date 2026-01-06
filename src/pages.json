@@ -1,0 +1,228 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/admin/dashboard/index",
+      "style": {
+        "navigationBarTitleText": "数据驾驶舱",
+        "navigationBarBackgroundColor": "#2563EB",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/admin/products/index",
+      "style": {
+        "navigationBarTitleText": "商品管理"
+      }
+    },
+    {
+      "path": "pages/admin/products/edit",
+      "style": {
+        "navigationBarTitleText": "编辑商品"
+      }
+    },
+    {
+      "path": "pages/admin/agents/index",
+      "style": {
+        "navigationBarTitleText": "代理管理"
+      }
+    },
+    {
+      "path": "pages/admin/agents/detail",
+      "style": {
+        "navigationBarTitleText": "代理详情"
+      }
+    },
+    {
+      "path": "pages/admin/agents/edit",
+      "style": {
+        "navigationBarTitleText": "添加代理"
+      }
+    },
+    {
+      "path": "pages/admin/orders/index",
+      "style": {
+        "navigationBarTitleText": "极速开单"
+      }
+    },
+    {
+      "path": "pages/admin/orders/detail",
+      "style": {
+        "navigationBarTitleText": "订单详情"
+      }
+    },
+    {
+      "path": "pages/admin/orders/list",
+      "style": {
+        "navigationBarTitleText": "订单列表"
+      }
+    },
+    {
+      "path": "pages/admin/finance/index",
+      "style": {
+        "navigationBarTitleText": "财务管理"
+      }
+    },
+    {
+      "path": "pages/admin/payees/index",
+      "style": {
+        "navigationBarTitleText": "收款人"
+      }
+    },
+    {
+      "path": "pages/admin/trucks/index",
+      "style": {
+        "navigationBarTitleText": "车型管理"
+      }
+    },
+    {
+      "path": "pages/admin/promotions/index",
+      "style": {
+        "navigationBarTitleText": "促销管理"
+      }
+    },
+    {
+      "path": "pages/admin/promotions/edit",
+      "style": {
+        "navigationBarTitleText": "编辑促销活动"
+      }
+    },
+    {
+      "path": "pages/admin/product-groups/index",
+      "style": {
+        "navigationBarTitleText": "产品组合"
+      }
+    },
+    {
+      "path": "pages/agent/home/index",
+      "style": {
+        "navigationBarTitleText": "我的业绩",
+        "navigationBarBackgroundColor": "#2563EB",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/agent/orders/index",
+      "style": {
+        "navigationBarTitleText": "我的订单"
+      }
+    },
+    {
+      "path": "pages/agent/materials/index",
+      "style": {
+        "navigationBarTitleText": "素材下载"
+      }
+    },
+    {
+      "path": "pages/agent/profile/index",
+      "style": {
+        "navigationBarTitleText": "个人中心"
+      }
+    },
+    {
+      "path": "pages/agent/balance/index",
+      "style": {
+        "navigationBarTitleText": "余额明细"
+      }
+    },
+    {
+      "path": "pages/agent/promotions/index",
+      "style": {
+        "navigationBarTitleText": "促销查询"
+      }
+    },
+    {
+      "path": "pages/super/dashboard/index",
+      "style": {
+        "navigationBarTitleText": "数据驾驶舱",
+        "navigationBarBackgroundColor": "#2563EB",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/super/orders/index",
+      "style": {
+        "navigationBarTitleText": "订单列表"
+      }
+    },
+    {
+      "path": "pages/super/finance/index",
+      "style": {
+        "navigationBarTitleText": "财务管理"
+      }
+    },
+    {
+      "path": "pages/super/agents/index",
+      "style": {
+        "navigationBarTitleText": "代理管理"
+      }
+    },
+    {
+      "path": "pages/super/payees/index",
+      "style": {
+        "navigationBarTitleText": "收款人"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "Nomur",
+    "navigationBarBackgroundColor": "#FFFFFF",
+    "backgroundColor": "#F5F7FA",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#94A3B8",
+    "selectedColor": "#2563EB",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/admin/dashboard/index",
+        "text": "驾驶舱",
+        "iconPath": "static/icons/dashboard.svg",
+        "selectedIconPath": "static/icons/dashboard-active.svg"
+      },
+      {
+        "pagePath": "pages/admin/orders/index",
+        "text": "开单",
+        "iconPath": "static/icons/order.svg",
+        "selectedIconPath": "static/icons/order-active.svg"
+      },
+      {
+        "pagePath": "pages/admin/agents/index",
+        "text": "客户",
+        "iconPath": "static/icons/product.svg",
+        "selectedIconPath": "static/icons/product-active.svg"
+      },
+      {
+        "pagePath": "pages/admin/finance/index",
+        "text": "财务",
+        "iconPath": "static/icons/finance.svg",
+        "selectedIconPath": "static/icons/finance-active.svg"
+      },
+      {
+        "pagePath": "pages/admin/payees/index",
+        "text": "收款人",
+        "iconPath": "static/icons/credit-card.svg",
+        "selectedIconPath": "static/icons/credit-card-active.svg"
+      }
+    ]
+  },
+  "condition": {
+    "current": 0,
+    "list": [
+      {
+        "name": "超级管理员端",
+        "path": "pages/super/dashboard/index",
+        "query": ""
+      }
+    ]
+  }
+}
