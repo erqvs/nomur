@@ -13,7 +13,7 @@
     "sdkConfigs": {}
   },
   "mp-weixin": {
-    "appid": "",
+    "appid": "wx51fe54bc8da9c4a3",
     "setting": {
       "urlCheck": false,
       "minified": true

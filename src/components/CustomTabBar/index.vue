@@ -1,5 +1,5 @@
 <template>
-  <view class="custom-tabbar" v-if="showTabBar">
+  <view class="custom-tabbar" v-show="showTabBar">
     <view 
       v-for="item in tabBarList" 
       :key="item.pagePath"
@@ -7,19 +7,27 @@
       :class="{ 'tabbar-item--active': isActive(item.pagePath) }"
       @tap="switchTab(item.pagePath)"
     >
-      <image 
-        :src="isActive(item.pagePath) ? item.selectedIconPath : item.iconPath" 
-        class="tabbar-icon" 
-        mode="aspectFit" 
-      />
+      <view class="tabbar-icon-wrapper">
+        <image 
+          :src="item.iconPath" 
+          class="tabbar-icon"
+          :class="{ 'tabbar-icon--hidden': isActive(item.pagePath) }"
+          mode="aspectFit" 
+        />
+        <image 
+          :src="item.selectedIconPath" 
+          class="tabbar-icon tabbar-icon--selected"
+          :class="{ 'tabbar-icon--visible': isActive(item.pagePath) }"
+          mode="aspectFit" 
+        />
+      </view>
       <text class="tabbar-text">{{ item.text }}</text>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
@@ -53,8 +61,8 @@ const adminTabBar = [
   {
     pagePath: 'pages/admin/payees/index',
     text: '收款人',
-    iconPath: '/static/icons/credit-card.svg',
-    selectedIconPath: '/static/icons/credit-card-active.svg'
+    iconPath: '/static/icons/users.svg',
+    selectedIconPath: '/static/icons/users-active.svg'
   }
 ]
 
@@ -87,31 +95,47 @@ const superTabBar = [
   {
     pagePath: 'pages/super/payees/index',
     text: '收款人',
-    iconPath: '/static/icons/credit-card.svg',
-    selectedIconPath: '/static/icons/credit-card-active.svg'
+    iconPath: '/static/icons/users.svg',
+    selectedIconPath: '/static/icons/users-active.svg'
   }
 ]
 
-const currentPath = ref('')
+// 使用 store 中的全局路径状态
+const currentPath = computed(() => store.tabBarCurrentPath)
+
+// 检查路径是否匹配管理端或超级管理员端
+const checkPath = (path: string): boolean => {
+  if (!path) return false
+  const normalizedPath = path.startsWith('/') ? path : '/' + path
+  return normalizedPath.startsWith('/pages/admin/') || normalizedPath.startsWith('/pages/super/')
+}
 
 const showTabBar = computed(() => {
-  return currentPath.value.startsWith('/pages/admin/') || currentPath.value.startsWith('/pages/super/')
+  return checkPath(currentPath.value)
 })
 
 const tabBarList = computed(() => {
-  if (currentPath.value.startsWith('/pages/super/')) {
+  const path = currentPath.value
+  const normalizedPath = path.startsWith('/') ? path : '/' + path
+  if (normalizedPath.startsWith('/pages/super/')) {
     return superTabBar
   }
   return adminTabBar
 })
 
 const isActive = (pagePath: string) => {
-  return currentPath.value === '/' + pagePath
+  const current = currentPath.value
+  const normalizedCurrent = current.startsWith('/') ? current : '/' + current
+  const target = '/' + pagePath
+  return normalizedCurrent === target
 }
 
 const switchTab = (pagePath: string) => {
   const fullPath = '/' + pagePath
   if (currentPath.value === fullPath) return
+  
+  // 先更新 store 中的路径，确保切换时 tabbar 状态正确
+  store.setTabBarPath(fullPath)
   
   if (pagePath.startsWith('pages/super/')) {
     uni.reLaunch({ url: fullPath })
@@ -120,18 +144,51 @@ const switchTab = (pagePath: string) => {
   }
 }
 
+// 从页面栈更新路径
+const updateFromPageStack = () => {
+  try {
+    const pages = getCurrentPages()
+    if (pages.length > 0) {
+      const lastPage = pages[pages.length - 1]
+      let route = lastPage.route || ''
+      if (route && !route.startsWith('/')) {
+        route = '/' + route
+      }
+      if (route) {
+        store.setTabBarPath(route)
+      }
+    }
+  } catch (error) {
+    console.error('[TabBar] 更新路径失败:', error)
+  }
+}
+
+// 监听全局事件
+const handlePathUpdate = (path: string) => {
+  if (path) {
+    store.setTabBarPath(path)
+  }
+}
+
 onMounted(() => {
-  const pages = getCurrentPages()
-  if (pages.length > 0) {
-    currentPath.value = '/' + pages[pages.length - 1].route
+  // 监听全局路径更新事件
+  uni.$on('update-tabbar-path', handlePathUpdate)
+  
+  // 立即从页面栈更新路径
+  updateFromPageStack()
+  
+  // 监听页面路由变化（某些平台支持）
+  if (typeof uni.onAppRoute !== 'undefined') {
+    uni.onAppRoute((res: any) => {
+      if (res.path) {
+        store.setTabBarPath(res.path)
+    }
+    })
   }
 })
 
-onShow(() => {
-  const pages = getCurrentPages()
-  if (pages.length > 0) {
-    currentPath.value = '/' + pages[pages.length - 1].route
-  }
+onUnmounted(() => {
+  uni.$off('update-tabbar-path', handlePathUpdate)
 })
 </script>
 
@@ -152,6 +209,9 @@ onShow(() => {
   padding-bottom: env(safe-area-inset-bottom);
   z-index: 1000;
   box-shadow: 0 -2rpx 12rpx rgba(0, 0, 0, 0.08);
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 .tabbar-item {
@@ -162,6 +222,7 @@ onShow(() => {
   justify-content: center;
   padding: 12rpx 0;
   height: 100rpx;
+  min-width: 0;
   
   &--active {
     .tabbar-text {
@@ -170,16 +231,49 @@ onShow(() => {
   }
 }
 
-.tabbar-icon {
+.tabbar-icon-wrapper {
+  position: relative;
   width: 48rpx;
   height: 48rpx;
   margin-bottom: 4rpx;
+  flex-shrink: 0;
+}
+
+.tabbar-icon {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 48rpx;
+  height: 48rpx;
+  transition: opacity 0.15s ease;
+  will-change: opacity;
+  
+  &--hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+  
+  &--selected {
+    opacity: 0;
+    pointer-events: none;
+  }
+  
+  &--visible {
+    opacity: 1;
+  }
 }
 
 .tabbar-text {
   font-size: 22rpx;
   color: #94A3B8;
   line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  display: block;
 }
 </style>
-

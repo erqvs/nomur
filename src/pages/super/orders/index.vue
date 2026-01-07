@@ -74,40 +74,9 @@
       </view>
     </view>
     
-    <!-- 修改订单弹窗 -->
-    <view v-if="showEditModal" class="modal-mask" @tap="closeEditModal">
-      <view class="modal-content modal-content--large" @tap.stop>
-        <text class="modal-title">修改订单</text>
-        <view class="modal-form">
-          <view class="form-item">
-            <text class="form-item__label">总金额 <text class="required">*</text></text>
-            <input
-              v-model.number="editForm.totalAmount"
-              type="number"
-              class="form-item__input"
-              placeholder="请输入总金额"
-            />
-          </view>
-          <view class="form-item">
-            <text class="form-item__label">备注</text>
-            <textarea
-              v-model="editForm.remark"
-              class="form-item__textarea"
-              placeholder="请输入备注"
-              maxlength="200"
-            />
-          </view>
-        </view>
-        <view class="modal-actions">
-          <view class="modal-btn modal-btn--cancel" @tap="closeEditModal">取消</view>
-          <view class="modal-btn modal-btn--confirm" @tap="confirmEdit">确认修改</view>
-        </view>
-      </view>
-    </view>
+    <!-- 自定义TabBar -->
+    <CustomTabBar />
   </view>
-  
-  <!-- 自定义TabBar -->
-  <CustomTabBar />
 </template>
 
 <script setup lang="ts">
@@ -122,12 +91,6 @@ const store = useAppStore()
 const filterAgentId = ref<string>('')
 const orders = ref<Order[]>([])
 const loading = ref(true)
-const showEditModal = ref(false)
-const editingOrder = ref<Order | null>(null)
-const editForm = ref({
-  totalAmount: 0,
-  remark: ''
-})
 
 onLoad((options) => {
   if (options?.agentId) {
@@ -139,7 +102,21 @@ onLoad((options) => {
   loadOrders()
 })
 
+// 更新 tabbar 路径
+const updateTabBarPath = () => {
+  try {
+    const pages = getCurrentPages()
+    if (pages.length > 0) {
+      const route = '/' + pages[pages.length - 1].route
+      uni.$emit('update-tabbar-path', route)
+    }
+  } catch (error) {
+    console.error('更新 tabbar 路径失败:', error)
+  }
+}
+
 onShow(() => {
+  updateTabBarPath()
   loadOrders()
 })
 
@@ -175,61 +152,14 @@ const goToDetail = (orderId: string) => {
 }
 
 const editOrder = (order: Order) => {
-  editingOrder.value = order
-  editForm.value = {
-    totalAmount: order.totalAmount,
-    remark: order.remark || ''
-  }
-  showEditModal.value = true
-}
-
-const closeEditModal = () => {
-  showEditModal.value = false
-  editingOrder.value = null
-  editForm.value = { totalAmount: 0, remark: '' }
-}
-
-const confirmEdit = async () => {
-  if (!editingOrder.value) return
-  
-  if (!editForm.value.totalAmount || editForm.value.totalAmount <= 0) {
-    uni.showToast({ title: '请输入有效的总金额', icon: 'none' })
-    return
-  }
-  
-  if (!store.currentAdmin || store.currentAdmin.role !== 'super_admin') {
-    uni.showToast({ title: '需要超级管理员权限', icon: 'none' })
-    return
-  }
-  
-  try {
-    await orderApi.update(
-      editingOrder.value.id,
-      {
-        agentId: editingOrder.value.agentId,
-        items: editingOrder.value.items,
-        totalWeight: editingOrder.value.totalWeight,
-        totalAmount: editForm.value.totalAmount,
-        driverPhone: editingOrder.value.driverPhone,
-        promotionId: editingOrder.value.promotionId,
-        giftItems: editingOrder.value.giftItems,
-        images: editingOrder.value.images,
-        remark: editForm.value.remark
-      },
-      store.currentAdmin.id,
-      store.currentAdmin.role
-    )
-    
-    uni.showToast({ title: '修改成功', icon: 'success' })
-    closeEditModal()
-    await loadOrders()
-    await store.loadAgents() // 刷新代理商余额
-  } catch (error: any) {
-    uni.showToast({ title: error.message || '修改失败', icon: 'none' })
-  }
+  // 跳转到编辑页面
+  uni.navigateTo({
+    url: `/pages/super/orders/edit?id=${order.id}`
+  })
 }
 
 onMounted(() => {
+  updateTabBarPath()
   loadOrders()
 })
 </script>
@@ -237,7 +167,7 @@ onMounted(() => {
 <style lang="scss" scoped>
 .orders-page {
   padding: 24rpx;
-  padding-bottom: 40rpx;
+  padding-bottom: calc(140rpx + env(safe-area-inset-bottom));
 }
 
 .order-list {
@@ -439,107 +369,5 @@ onMounted(() => {
   color: $text-placeholder;
 }
 
-// 弹窗样式
-.modal-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: flex-end;
-  z-index: 1000;
-}
-
-.modal-content {
-  width: 100%;
-  background: #fff;
-  border-radius: 32rpx 32rpx 0 0;
-  padding: 40rpx;
-  padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
-  max-height: 80vh;
-  overflow-y: auto;
-  
-  &--large {
-    max-height: 90vh;
-  }
-}
-
-.modal-title {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: $text-primary;
-  text-align: center;
-  display: block;
-  margin-bottom: 32rpx;
-}
-
-.modal-form {
-  margin-bottom: 32rpx;
-}
-
-.form-item {
-  margin-bottom: 32rpx;
-  
-  &__label {
-    font-size: 28rpx;
-    font-weight: 500;
-    color: $text-primary;
-    margin-bottom: 16rpx;
-    display: block;
-  }
-  
-  &__input {
-    width: 100%;
-    padding: 24rpx;
-    background: $bg-grey;
-    border-radius: $border-radius;
-    font-size: 28rpx;
-    color: $text-primary;
-  }
-  
-  &__textarea {
-    width: 100%;
-    min-height: 200rpx;
-    padding: 24rpx;
-    background: $bg-grey;
-    border-radius: $border-radius;
-    font-size: 28rpx;
-    color: $text-primary;
-  }
-}
-
-.required {
-  color: $danger-color;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 24rpx;
-}
-
-.modal-btn {
-  flex: 1;
-  padding: 28rpx;
-  border-radius: $border-radius-lg;
-  text-align: center;
-  font-size: 32rpx;
-  font-weight: 600;
-  
-  &--cancel {
-    background: $bg-grey;
-    color: $text-secondary;
-  }
-  
-  &--confirm {
-    background: $primary-color;
-    color: #fff;
-  }
-  
-  &:active {
-    opacity: 0.8;
-  }
-}
 </style>
 

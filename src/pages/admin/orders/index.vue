@@ -12,8 +12,28 @@
     
     <!-- 选择商品 -->
     <view class="card">
-      <view class="section-title">选择商品</view>
-      <view class="product-select">
+      <view class="section-header">
+        <view class="section-title">选择商品</view>
+        <view class="mode-switch">
+          <view 
+            class="mode-switch__item"
+            :class="{ 'mode-switch__item--active': !useProductGroupMode }"
+            @tap="useProductGroupMode = false"
+          >
+            单个
+          </view>
+          <view 
+            class="mode-switch__item"
+            :class="{ 'mode-switch__item--active': useProductGroupMode }"
+            @tap="useProductGroupMode = true"
+          >
+            组合
+          </view>
+        </view>
+      </view>
+      
+      <!-- 单个产品选择模式 -->
+      <view v-if="!useProductGroupMode" class="product-select">
         <view 
           v-for="product in products" 
           :key="product.id"
@@ -36,6 +56,43 @@
                 @input="(e: any) => setQuantity(product.id, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
               />
               <view class="quantity-btn quantity-btn--small" @tap="changeQuantity(product.id, 1)">+</view>
+            </view>
+          </view>
+        </view>
+      </view>
+      
+      <!-- 产品组合选择模式 -->
+      <view v-else class="product-group-select">
+        <text class="form-desc">选择产品类型，系统将从该类型下的产品中自动分配</text>
+        <view class="gift-type-select">
+          <view 
+            v-for="category in categorizedProducts"
+            :key="category.type"
+            class="gift-type-item"
+            :class="{ 'gift-type-item--active': isProductTypeSelected(category.type) }"
+          >
+            <view class="gift-type-item__left" @tap="toggleProductTypeSelection(category.type)">
+              <view class="gift-type-item__check">
+                <text v-if="isProductTypeSelected(category.type)">✓</text>
+              </view>
+              <view class="gift-type-item__info">
+                <text class="gift-type-item__name">{{ category.type }}</text>
+                <text class="gift-type-item__products">{{ category.products.map(p => p.name).join('、') }}</text>
+              </view>
+            </view>
+            <view v-if="isProductTypeSelected(category.type)" class="gift-type-item__quantity" @tap.stop>
+              <view class="quantity-control">
+                <view class="quantity-btn quantity-btn--small" @tap="changeProductTypeQuantity(category.type, -10)">-10</view>
+                <view class="quantity-btn quantity-btn--small" @tap="changeProductTypeQuantity(category.type, -1)">-</view>
+                <input 
+                  type="number" 
+                  :value="getProductTypeQuantity(category.type)" 
+                  class="quantity-input quantity-input--small"
+                  @input="(e: any) => setProductTypeQuantity(category.type, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                />
+                <view class="quantity-btn quantity-btn--small" @tap="changeProductTypeQuantity(category.type, 1)">+</view>
+                <view class="quantity-btn quantity-btn--small" @tap="changeProductTypeQuantity(category.type, 10)">+10</view>
+              </view>
             </view>
           </view>
         </view>
@@ -207,7 +264,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAppStore } from '@/stores/app'
 import TagSelect from '@/components/TagSelect/index.vue'
@@ -230,6 +287,17 @@ const showTruckSelect = ref(false)
 
 // 暂存每个商品的数量（用于取消勾选后恢复）
 const productQuantityCache = ref<Record<string, number>>({})
+
+// 产品组合选择模式
+const useProductGroupMode = ref(false)
+
+// 产品类型组合（用于组合选择模式）
+interface ProductTypeGroup {
+  type: string
+  quantity: number
+  productIds: string[]
+}
+const productTypeGroups = ref<ProductTypeGroup[]>([])
 
 const form = ref({
   agentId: null as string | null,
@@ -338,6 +406,132 @@ const agentOptions = computed(() =>
 
 const products = computed(() => store.products)
 
+// 产品分类（用于组合选择）
+const categorizedProducts = computed(() => {
+  const categories: { [key: string]: { type: string; products: any[] } } = {}
+  store.products.forEach(p => {
+    let type = '其他'
+    if (p.name.includes('芒果')) {
+      type = '芒果类'
+    } else if (p.name.includes('茶')) {
+      type = '茶类'
+    } else if (p.name.includes('龙眼') || p.name.includes('水果')) {
+      type = '水果类'
+    }
+
+    if (!categories[type]) {
+      categories[type] = { type, products: [] }
+    }
+    categories[type].products.push(p)
+  })
+  return Object.values(categories)
+})
+
+// 产品类型选择相关方法
+const isProductTypeSelected = (type: string) => {
+  return productTypeGroups.value.some(g => g.type === type)
+}
+
+const toggleProductTypeSelection = (type: string) => {
+  uni.vibrateShort({ type: 'light' })
+  const index = productTypeGroups.value.findIndex(g => g.type === type)
+  if (index > -1) {
+    productTypeGroups.value.splice(index, 1)
+    // 清除该类型对应的items
+    updateItemsFromProductGroups()
+  } else {
+    const category = categorizedProducts.value.find(c => c.type === type)
+    if (category) {
+      productTypeGroups.value.push({
+        type,
+        quantity: 10, // 默认10箱
+        productIds: category.products.map(p => p.id)
+      })
+      updateItemsFromProductGroups()
+    }
+  }
+}
+
+const getProductTypeQuantity = (type: string) => {
+  const group = productTypeGroups.value.find(g => g.type === type)
+  return group?.quantity || 0
+}
+
+const setProductTypeQuantity = (type: string, quantity: number) => {
+  const group = productTypeGroups.value.find(g => g.type === type)
+  if (group) {
+    group.quantity = Math.max(1, quantity || 1)
+    updateItemsFromProductGroups()
+  }
+}
+
+const changeProductTypeQuantity = (type: string, delta: number) => {
+  const group = productTypeGroups.value.find(g => g.type === type)
+  if (group) {
+    const step = Math.abs(delta) === 10 ? 10 : 1
+    group.quantity = Math.max(1, group.quantity + (delta > 0 ? step : -step))
+    updateItemsFromProductGroups()
+  }
+}
+
+// 根据产品类型组合更新items
+const updateItemsFromProductGroups = () => {
+  // 清空现有items
+  form.value.items = []
+  
+  // 根据类型组合生成items（随机分配）
+  productTypeGroups.value.forEach(group => {
+    if (group.productIds.length === 0) return
+    
+    const availableProducts = store.products.filter(p => group.productIds.includes(p.id))
+    if (availableProducts.length === 0) return
+    
+    // 随机分配到类型下的产品
+    let remainingQuantity = group.quantity
+    const distribution: Record<string, number> = {}
+    
+    while (remainingQuantity > 0) {
+      const randomProduct = availableProducts[Math.floor(Math.random() * availableProducts.length)]
+      const qtyToAdd = Math.min(remainingQuantity, Math.floor(Math.random() * remainingQuantity) + 1)
+      
+      distribution[randomProduct.id] = (distribution[randomProduct.id] || 0) + qtyToAdd
+      remainingQuantity -= qtyToAdd
+    }
+    
+    // 添加到items
+    Object.entries(distribution).forEach(([productId, quantity]) => {
+      const product = store.products.find(p => p.id === productId)
+      if (product) {
+        const existingItem = form.value.items.find(item => item.productId === productId)
+        if (existingItem) {
+          existingItem.quantity += quantity
+        } else {
+          form.value.items.push({
+            productId: product.id,
+            productName: product.name,
+            quantity,
+            price: product.price,
+            weight: product.weight
+          })
+        }
+      }
+    })
+  })
+}
+
+// 监听组合模式切换
+const watchUseProductGroupMode = () => {
+  if (useProductGroupMode.value) {
+    // 切换到组合模式时，清空items
+    form.value.items = []
+  } else {
+    // 切换到单个模式时，清空类型组合
+    productTypeGroups.value = []
+  }
+}
+
+// 使用watch监听useProductGroupMode变化
+watch(useProductGroupMode, watchUseProductGroupMode)
 
 const promotionOptions = computed(() => 
   store.promotions.filter(p => p.isActive).map(p => ({
@@ -444,10 +638,20 @@ const giftPromotions = computed(() => {
       if (times > 0) {
         promotions.push({
           name: promotion.name,
-          gifts: promotion.gifts.map(g => ({
-            productName: g.productName,
-            quantity: g.quantity * times
-          }))
+          gifts: promotion.gifts.map(g => {
+            // 新格式：显示类型
+            if (g.type) {
+              return {
+                productName: `${g.type}（随机分配）`,
+                quantity: g.quantity * times
+              }
+            }
+            // 旧格式：显示具体产品
+            return {
+              productName: g.productName,
+              quantity: g.quantity * times
+            }
+          })
         })
       }
     }
@@ -515,9 +719,22 @@ const submitOrder = async () => {
         const times = Math.floor(conditionQuantity / promotion.threshold)
         if (times > 0) {
           promotion.gifts.forEach(g => {
-            const key = g.productId
-            const existingQty = giftMap.get(key) || 0
-            giftMap.set(key, existingQty + (g.quantity * times))
+            // 新格式：按类型随机分配
+            if (g.type && g.productIds && g.productIds.length > 0) {
+              const totalQuantity = g.quantity * times
+              // 从该类型下的产品中随机分配
+              for (let i = 0; i < totalQuantity; i++) {
+                const randomIndex = Math.floor(Math.random() * g.productIds.length)
+                const randomProductId = g.productIds[randomIndex]
+                const existingQty = giftMap.get(randomProductId) || 0
+                giftMap.set(randomProductId, existingQty + 1)
+              }
+            } else {
+              // 旧格式：直接使用 productId
+              const key = g.productId
+              const existingQty = giftMap.get(key) || 0
+              giftMap.set(key, existingQty + (g.quantity * times))
+            }
           })
         }
       }
@@ -707,10 +924,122 @@ const submitOrder = async () => {
 }
 
 
+// 模式切换按钮
+.mode-switch {
+  display: flex;
+  align-items: center;
+  background: $bg-grey;
+  border-radius: 8rpx;
+  padding: 4rpx;
+  gap: 4rpx;
+  
+  &__item {
+    flex: 1;
+    padding: 8rpx 16rpx;
+    text-align: center;
+    font-size: 24rpx;
+    color: $text-secondary;
+    border-radius: 6rpx;
+    transition: all $transition-fast;
+    
+    &--active {
+      background: #fff;
+      color: $primary-color;
+      font-weight: 500;
+    }
+  }
+}
+
+// 表单描述文字
+.form-desc {
+  font-size: 24rpx;
+  color: $text-secondary;
+  margin-bottom: 16rpx;
+  line-height: 1.5;
+}
+
 .product-select {
   display: flex;
   flex-direction: column;
   gap: 12rpx;
+}
+
+.product-group-select {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.gift-type-select {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.gift-type-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx;
+  background: $bg-grey;
+  border-radius: $border-radius;
+  border: 2rpx solid transparent;
+  transition: all $transition-fast;
+  
+  &--active {
+    background: rgba($primary-color, 0.08);
+    border-color: $primary-color;
+  }
+  
+  &__left {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+  }
+  
+  &__check {
+    width: 36rpx;
+    height: 36rpx;
+    border-radius: 50%;
+    border: 2rpx solid $border-color;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 16rpx;
+    font-size: 20rpx;
+    color: #fff;
+    flex-shrink: 0;
+    
+    .gift-type-item--active & {
+      background: $primary-color;
+      border-color: $primary-color;
+    }
+  }
+  
+  &__info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4rpx;
+  }
+  
+  &__name {
+    font-size: 28rpx;
+    font-weight: 500;
+    color: $text-primary;
+  }
+  
+  &__products {
+    font-size: 24rpx;
+    color: $text-secondary;
+    line-height: 1.4;
+  }
+  
+  &__quantity {
+    margin-left: 16rpx;
+    flex-shrink: 0;
+  }
 }
 
 .product-select-item {
@@ -774,28 +1103,35 @@ const submitOrder = async () => {
 }
 
 .quantity-btn {
-  width: 44rpx;
-  height: 44rpx;
+  width: 60rpx;
+  height: 60rpx;
   background: #fff;
   border: 1rpx solid $border-color;
   border-radius: 6rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22rpx;
+  font-size: 32rpx;
   font-weight: 500;
   color: $text-primary;
   
   &:active {
     background: $bg-grey;
   }
+  
+  &--small {
+    width: 50rpx;
+    height: 50rpx;
+    font-size: 22rpx;
+    min-width: 50rpx;
+  }
 }
 
 .quantity-input {
-  width: 70rpx;
-  height: 44rpx;
+  width: 90rpx;
+  height: 60rpx;
   text-align: center;
-  font-size: 24rpx;
+  font-size: 32rpx;
   font-weight: 500;
   background: #fff;
   border: 1rpx solid $border-color;

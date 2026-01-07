@@ -1,5 +1,15 @@
 <template>
   <view class="dashboard">
+    <!-- 自定义导航栏 -->
+    <view class="custom-navbar">
+      <view class="navbar-content">
+        <text class="navbar-title">数据驾驶舱</text>
+        <view class="switch-btn" @tap="switchAccount">
+          <text>切换账号</text>
+        </view>
+      </view>
+    </view>
+    
     <!-- 顶部操作栏 -->
     <view class="top-bar">
       <view class="quick-link" @tap="goToProducts">
@@ -16,9 +26,6 @@
       </view>
       <view class="quick-link" @tap="goToOrders">
         <text>订单列表</text>
-      </view>
-      <view class="switch-btn" @tap="switchAccount">
-        <text>切换账号</text>
       </view>
     </view>
     
@@ -196,13 +203,44 @@ const switchAccount = () => {
 
 <style lang="scss" scoped>
 .dashboard {
-  padding: 24rpx;
+  padding-top: 0;
+  padding-left: 24rpx;
+  padding-right: 24rpx;
   padding-bottom: 32rpx;
+}
+
+// 自定义导航栏
+.custom-navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(44px + env(safe-area-inset-top));
+  background: $primary-color;
+  z-index: 1000;
+  padding-top: env(safe-area-inset-top);
+}
+
+.navbar-content {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24rpx;
+}
+
+.navbar-title {
+  font-size: 36rpx;
+  font-weight: 600;
+  color: #fff;
+  flex: 1;
+  text-align: center;
 }
 
 .top-bar {
   display: flex;
   gap: 16rpx;
+  margin-top: calc(44px + env(safe-area-inset-top) + 24rpx);
   margin-bottom: 24rpx;
 }
 
@@ -216,20 +254,28 @@ const switchAccount = () => {
   color: $primary-color;
   box-shadow: $shadow-sm;
   
+  text {
+    display: block;
+  }
+  
   &:active {
     background: $bg-hover;
   }
 }
 
 .switch-btn {
-  padding: 20rpx 24rpx;
-  background: $bg-grey;
-  border-radius: $border-radius;
-  font-size: 26rpx;
-  color: $text-secondary;
+  padding: 8rpx 16rpx;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8rpx;
+  font-size: 24rpx;
+  color: #fff;
+  
+  text {
+    display: block;
+  }
   
   &:active {
-    background: darken($bg-grey, 5%);
+    background: rgba(255, 255, 255, 0.3);
   }
 }
 

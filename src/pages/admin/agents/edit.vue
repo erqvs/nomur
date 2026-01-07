@@ -591,14 +591,15 @@ const saveAgent = async () => {
 
 .form-textarea {
   width: 100%;
-  min-height: 160rpx;
-  padding: 20rpx;
+  min-height: 200rpx;
+  padding: 32rpx;
   background: $bg-grey;
   border-radius: $border-radius;
-  font-size: 28rpx;
+  font-size: 36rpx;
   color: $text-primary;
   border: 2rpx solid $border-color;
   box-sizing: border-box;
+  line-height: 1.5;
   
   &:focus {
     border-color: $primary-color;
@@ -639,15 +640,15 @@ const saveAgent = async () => {
 }
 
 .quantity-btn {
-  width: 44rpx;
-  height: 44rpx;
+  width: 60rpx;
+  height: 60rpx;
   background: #fff;
   border: 1rpx solid $border-color;
   border-radius: 6rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22rpx;
+  font-size: 32rpx;
   font-weight: 500;
   color: $text-primary;
   
@@ -656,26 +657,26 @@ const saveAgent = async () => {
   }
   
   &--small {
-    width: 44rpx;
-    height: 44rpx;
-    font-size: 22rpx;
+    width: 60rpx;
+    height: 60rpx;
+    font-size: 32rpx;
   }
 }
 
 .quantity-input {
-  width: 100rpx;
-  height: 44rpx;
+  width: 120rpx;
+  height: 60rpx;
   text-align: center;
-  font-size: 28rpx;
+  font-size: 36rpx;
   font-weight: 500;
   background: #fff;
   border: 1rpx solid $border-color;
   border-radius: 6rpx;
   
   &--small {
-    width: 100rpx;
-    height: 44rpx;
-    font-size: 28rpx;
+    width: 120rpx;
+    height: 60rpx;
+    font-size: 36rpx;
   }
 }
 

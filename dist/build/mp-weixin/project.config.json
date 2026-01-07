@@ -1,0 +1,43 @@
+{
+  "description": "项目配置文件。",
+  "packOptions": {
+    "ignore": []
+  },
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": false,
+    "minified": true,
+    "newFeature": true,
+    "bigPackageSizeSupport": true
+  },
+  "compileType": "miniprogram",
+  "libVersion": "",
+  "appid": "wx51fe54bc8da9c4a3",
+  "projectname": "Nomur微商管理",
+  "condition": {
+    "search": {
+      "current": -1,
+      "list": []
+    },
+    "conversation": {
+      "current": -1,
+      "list": []
+    },
+    "game": {
+      "current": -1,
+      "list": []
+    },
+    "miniprogram": {
+      "current": 0,
+      "list": [
+        {
+          "name": "超级管理员端",
+          "query": "",
+          "id": 0,
+          "pathName": "pages/super/dashboard/index"
+        }
+      ]
+    }
+  }
+}

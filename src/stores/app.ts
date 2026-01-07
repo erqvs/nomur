@@ -15,6 +15,9 @@ export const useAppStore = defineStore('app', () => {
     role: 'admin' | 'super_admin'
   } | null>(null)
   
+  // TabBar 当前路径（全局状态，避免页面切换时重新加载）
+  const tabBarCurrentPath = ref<string>('')
+  
   // 是否为超级管理员
   const isSuperAdmin = computed(() => currentAdmin.value?.role === 'super_admin')
   
@@ -252,17 +255,16 @@ export const useAppStore = defineStore('app', () => {
     amount: number,
     reason: 'fine' | 'shipping',
     remark?: string,
-    productId?: string,
-    quantity?: number
+    orderItems?: Array<{ productId: string; productName: string; quantity: number; price: number; weight: number }>
   ) => {
-    const result = await transactionApi.deduct({ agentId, amount, reason, remark, productId, quantity })
+    const result = await transactionApi.deduct({ agentId, amount, reason, remark, orderItems })
     await Promise.all([loadAgents(), loadTransactions()])
     return result
   }
   
   // 调货
-  const transfer = async (fromAgentId: string, toAgentId: string, amount: number, productId?: string, quantity?: number, remark?: string) => {
-    const result = await transactionApi.transfer({ fromAgentId, toAgentId, amount, productId, quantity, remark })
+  const transfer = async (fromAgentId: string, toAgentId: string, amount: number, orderItems?: Array<{ productId: string; productName: string; quantity: number; price: number; weight: number }>, remark?: string) => {
+    const result = await transactionApi.transfer({ fromAgentId, toAgentId, amount, orderItems, remark })
     await Promise.all([loadAgents(), loadTransactions()])
     return result
   }
@@ -275,6 +277,14 @@ export const useAppStore = defineStore('app', () => {
   // 设置当前管理员信息
   const setCurrentAdmin = (admin: { id: string; name: string; role: 'admin' | 'super_admin' } | null) => {
     currentAdmin.value = admin
+  }
+  
+  // 更新 TabBar 当前路径
+  const setTabBarPath = (path: string) => {
+    const normalizedPath = path.startsWith('/') ? path : '/' + path
+    if (tabBarCurrentPath.value !== normalizedPath) {
+      tabBarCurrentPath.value = normalizedPath
+    }
   }
   
   return {
@@ -318,6 +328,10 @@ export const useAppStore = defineStore('app', () => {
     deduct,
     transfer,
     switchRole,
-    setCurrentAdmin
+    setCurrentAdmin,
+    
+    // TabBar 相关
+    tabBarCurrentPath,
+    setTabBarPath
   }
 })

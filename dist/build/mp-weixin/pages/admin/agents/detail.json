@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "代理详情",
+  "usingComponents": {
+    "balance-card": "../../../components/BalanceCard/index",
+    "tag-select": "../../../components/TagSelect/index",
+    "quick-input": "../../../components/QuickInput/index",
+    "image-uploader": "../../../components/ImageUploader/index"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "财务管理",
+  "usingComponents": {
+    "custom-tab-bar": "../../../components/CustomTabBar/index"
+  }
+}

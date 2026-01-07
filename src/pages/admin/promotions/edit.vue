@@ -106,29 +106,34 @@
       <!-- 赠品选择 -->
       <view class="form-item">
         <text class="form-label">赠品选择（可多选）</text>
-        <view class="product-select">
+        <text class="form-desc">选择产品类型，系统将从该类型下的产品中随机分配</text>
+        <view class="gift-type-select">
           <view 
-            v-for="product in products" 
-            :key="product.id"
-            class="product-select-item"
-            :class="{ 'product-select-item--active': isGiftSelected(product.id) }"
+            v-for="type in giftTypes" 
+            :key="type.name"
+            class="gift-type-item"
+            :class="{ 'gift-type-item--active': isGiftTypeSelected(type.name) }"
           >
-            <view class="product-select-item__left" @tap="toggleGiftSelection(product.id)">
-              <view class="product-select-item__check">
-                <text v-if="isGiftSelected(product.id)">✓</text>
+            <view class="gift-type-item__left" @tap="toggleGiftTypeSelection(type.name)">
+              <view class="gift-type-item__check">
+                <text v-if="isGiftTypeSelected(type.name)">✓</text>
               </view>
-              <text class="product-select-item__name">{{ product.name }}</text>
+              <view class="gift-type-item__info">
+                <text class="gift-type-item__name">{{ type.name }}</text>
+                <text class="gift-type-item__products">{{ type.products.map(p => p.name).join('、') }}</text>
+              </view>
             </view>
-            <view v-if="isGiftSelected(product.id)" class="product-select-item__quantity" @tap.stop>
+            <view v-if="isGiftTypeSelected(type.name)" class="gift-type-item__quantity" @tap.stop>
               <view class="quantity-control">
-                <view class="quantity-btn quantity-btn--small" @tap="changeGiftQuantity(getGiftIndex(product.id), -1)">-</view>
+                <view class="quantity-btn quantity-btn--small" @tap="changeGiftTypeQuantity(type.name, -1)">-</view>
                 <input 
                   type="number" 
-                  :value="getGiftQuantity(product.id)" 
+                  :value="getGiftTypeQuantity(type.name)" 
                   class="quantity-input quantity-input--small"
-                  @input="(e: any) => setGiftQuantity(product.id, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                  @input="(e: any) => setGiftTypeQuantity(type.name, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
                 />
-                <view class="quantity-btn quantity-btn--small" @tap="changeGiftQuantity(getGiftIndex(product.id), 1)">+</view>
+                <text class="quantity-unit">箱</text>
+                <view class="quantity-btn quantity-btn--small" @tap="changeGiftTypeQuantity(type.name, 1)">+</view>
               </view>
             </view>
           </view>
@@ -177,7 +182,7 @@ const form = ref({
   threshold: 100,
   conditionProducts: [] as string[], // 触发条件的产品ID列表（支持组合）
   conditionGroupId: '' as string | undefined, // 触发条件的组合ID
-  gifts: [] as Array<{ productId: string; quantity: number }>,
+  gifts: [] as Array<{ type: string; quantity: number; productIds: string[] }>, // 赠品：类型、数量、该类型下的产品ID列表
   startDate: '',
   endDate: ''
 })
@@ -185,11 +190,45 @@ const form = ref({
 // 产品组合列表
 const productGroups = ref<ProductGroup[]>([])
 
+// 加载产品组合列表
+const loadProductGroups = async () => {
+  try {
+    productGroups.value = await productGroupApi.getAll()
+  } catch (error) {
+    console.error('加载产品组合失败:', error)
+    uni.showToast({ title: '加载产品组合失败', icon: 'none' })
+  }
+}
+
 // 选中的触发条件产品（用于组合选择）
 const selectedConditionProducts = ref<string[]>([])
 
-// 已选中的赠品产品ID列表
-const selectedGifts = computed(() => form.value.gifts.map(g => g.productId))
+// 根据产品名称提取类型
+const extractProductType = (productName: string): string => {
+  if (productName.includes('芒果')) return '芒果'
+  if (productName.includes('茶')) return '茶'
+  if (productName.includes('龙眼') || productName.includes('水果')) return '水果'
+  // 默认返回产品名称的第一个词作为类型
+  return productName.split(/[茶果汁]/)[0] || productName
+}
+
+// 产品类型列表（自动从产品中提取）
+const giftTypes = computed(() => {
+  const typeMap = new Map<string, Array<{ id: string; name: string }>>()
+  
+  products.value.forEach(product => {
+    const type = extractProductType(product.name)
+    if (!typeMap.has(type)) {
+      typeMap.set(type, [])
+    }
+    typeMap.get(type)!.push({ id: product.id, name: product.name })
+  })
+  
+  return Array.from(typeMap.entries()).map(([name, products]) => ({
+    name,
+    products
+  }))
+})
 
 // 触发条件产品相关方法
 const isConditionProductSelected = (productId: string) => {
@@ -216,6 +255,23 @@ const toggleConditionProductSelection = (productId: string) => {
 }
 
 const clearConditionSelection = () => {
+  selectedConditionProducts.value = []
+}
+
+// 选择产品组合作为触发条件
+const selectConditionGroup = (group: ProductGroup) => {
+  uni.vibrateShort({ type: 'light' })
+  form.value.conditionGroupId = group.id
+  // 将组合中的产品添加到条件产品列表
+  form.value.conditionProducts = [...group.productIds]
+  // 清空临时选择的产品
+  selectedConditionProducts.value = []
+}
+
+// 清除产品组合选择
+const clearConditionGroup = () => {
+  form.value.conditionGroupId = ''
+  form.value.conditionProducts = []
   selectedConditionProducts.value = []
 }
 
@@ -250,70 +306,62 @@ const saveConditionGroup = () => {
   clearConditionSelection()
 }
 
-// 判断产品是否被选中
-const isGiftSelected = (productId: string) => {
-  return selectedGifts.value.includes(productId)
+// 判断产品类型是否被选中
+const isGiftTypeSelected = (typeName: string) => {
+  return form.value.gifts.some(g => g.type === typeName)
 }
 
-// 切换赠品选择
-const toggleGiftSelection = (productId: string) => {
-  const index = form.value.gifts.findIndex(g => g.productId === productId)
+// 切换赠品类型选择
+const toggleGiftTypeSelection = (typeName: string) => {
+  const index = form.value.gifts.findIndex(g => g.type === typeName)
   if (index > -1) {
     // 已选中，取消选择
     form.value.gifts.splice(index, 1)
   } else {
     // 未选中，添加选择
-    form.value.gifts.push({
-      productId,
-      quantity: 1
-    })
+    const type = giftTypes.value.find(t => t.name === typeName)
+    if (type) {
+      form.value.gifts.push({
+        type: typeName,
+        quantity: 1,
+        productIds: type.products.map(p => p.id)
+      })
+    }
   }
 }
 
-// 获取产品图片
-const getProductImage = (productId: string) => {
-  const product = products.value.find(p => p.id === productId)
-  return product?.image || ''
+// 获取赠品类型在数组中的索引
+const getGiftTypeIndex = (typeName: string) => {
+  return form.value.gifts.findIndex(g => g.type === typeName)
+}
+
+// 获取赠品类型数量
+const getGiftTypeQuantity = (typeName: string) => {
+  const gift = form.value.gifts.find(g => g.type === typeName)
+  return gift?.quantity || 1
+}
+
+// 设置赠品类型数量
+const setGiftTypeQuantity = (typeName: string, quantity: number) => {
+  const index = getGiftTypeIndex(typeName)
+  if (index > -1) {
+    form.value.gifts[index].quantity = Math.max(1, quantity || 1)
+  }
+}
+
+// 改变赠品类型数量（增加或减少）
+const changeGiftTypeQuantity = (typeName: string, delta: number) => {
+  const index = getGiftTypeIndex(typeName)
+  if (index > -1) {
+    const newQuantity = form.value.gifts[index].quantity + delta
+    form.value.gifts[index].quantity = Math.max(1, newQuantity)
+  }
 }
 
 // 获取产品名称
 const getProductName = (productId: string) => {
   const product = products.value.find(p => p.id === productId)
   return product?.name || ''
-}
-
-// 获取赠品在数组中的索引
-const getGiftIndex = (productId: string) => {
-  return form.value.gifts.findIndex(g => g.productId === productId)
-}
-
-// 获取赠品数量
-const getGiftQuantity = (productId: string) => {
-  const gift = form.value.gifts.find(g => g.productId === productId)
-  return gift?.quantity || 1
-}
-
-// 设置赠品数量
-const setGiftQuantity = (productId: string, quantity: number) => {
-  const index = getGiftIndex(productId)
-  if (index > -1) {
-    form.value.gifts[index].quantity = Math.max(1, quantity || 1)
-  }
-}
-
-// 改变赠品数量（增加或减少）
-const changeGiftQuantity = (index: number, delta: number) => {
-  if (index > -1 && index < form.value.gifts.length) {
-    const newQuantity = form.value.gifts[index].quantity + delta
-    form.value.gifts[index].quantity = Math.max(1, newQuantity)
-  }
-}
-
-// 确保数量为正整数
-const ensureGiftQuantity = (index: number) => {
-  if (form.value.gifts[index].quantity <= 0) {
-    form.value.gifts[index].quantity = 1
-  }
 }
 
 // 格式化日期为 YYYY-MM-DD 格式（用于 picker 组件）
@@ -346,6 +394,11 @@ onMounted(async () => {
 })
 
 onLoad(async (options) => {
+  // 确保产品数据已加载
+  if (store.products.length === 0) {
+    await store.loadProducts()
+  }
+  
   if (options?.id) {
     promotionId.value = options.id
     uni.setNavigationBarTitle({
@@ -357,16 +410,37 @@ onLoad(async (options) => {
       const promotions = await promotionApi.getAll()
       const promo = promotions.find(p => p.id === options.id)
       if (promo) {
+        // 转换赠品格式：兼容旧格式（productId）和新格式（type）
+        const convertedGifts = promo.gifts.map((g: any) => {
+          // 如果是新格式（有type字段）
+          if (g.type) {
+            return {
+              type: g.type,
+              quantity: g.quantity,
+              productIds: g.productIds || []
+            }
+          }
+          // 旧格式：根据productId找到对应的类型
+          const product = products.value.find(p => p.id === g.productId)
+          if (product) {
+            const type = extractProductType(product.name)
+            const typeInfo = giftTypes.value.find(t => t.name === type)
+            return {
+              type: type,
+              quantity: g.quantity,
+              productIds: typeInfo ? typeInfo.products.map(p => p.id) : [g.productId]
+            }
+          }
+          return null
+        }).filter((g: any) => g !== null)
+        
         form.value = {
           name: promo.name,
           description: promo.description || '',
           threshold: promo.threshold,
           conditionProducts: (promo.conditionProducts as string[]) || [],
           conditionGroupId: (promo as any).conditionGroupId || '',
-          gifts: promo.gifts.map((g: any) => ({
-            productId: g.productId,
-            quantity: g.quantity
-          })),
+          gifts: convertedGifts,
           startDate: formatDateForPicker(promo.startDate),
           endDate: formatDateForPicker(promo.endDate)
         }
@@ -399,15 +473,17 @@ const savePromotion = async () => {
   }
   
   try {
-    // 构造gifts数组，包含产品ID、产品名称和数量
-    const gifts = form.value.gifts.map(gift => {
-      const product = products.value.find(p => p.id === gift.productId)
-      return {
-        productId: gift.productId,
-        productName: product?.name || '',
-        quantity: gift.quantity
-      }
-    })
+    // 构造gifts数组，新格式：包含类型、数量、产品ID列表
+    const gifts = form.value.gifts.map(gift => ({
+      type: gift.type,
+      quantity: gift.quantity,
+      productIds: gift.productIds,
+      // 兼容字段：保留第一个产品ID和名称（用于向后兼容）
+      productId: gift.productIds[0] || '',
+      productName: gift.productIds.length > 0 
+        ? products.value.find(p => p.id === gift.productIds[0])?.name || gift.type
+        : gift.type
+    }))
     
     await promotionApi.update(promotionId.value, {
       name: form.value.name,
@@ -466,12 +542,13 @@ const savePromotion = async () => {
 
 .form-input {
   width: 100%;
-  height: 88rpx;
-  padding: 0 24rpx;
+  min-height: 96rpx;
+  padding: 0 32rpx;
   background: $bg-grey;
   border-radius: $border-radius;
-  font-size: 28rpx;
+  font-size: 36rpx;
   box-sizing: border-box;
+  line-height: 1.5;
 }
 
 .form-picker {
@@ -555,15 +632,15 @@ const savePromotion = async () => {
 }
 
 .quantity-btn {
-  width: 44rpx;
-  height: 44rpx;
+  width: 60rpx;
+  height: 60rpx;
   background: #fff;
   border: 1rpx solid $border-color;
   border-radius: 6rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22rpx;
+  font-size: 32rpx;
   font-weight: 500;
   color: $text-primary;
   
@@ -572,27 +649,113 @@ const savePromotion = async () => {
   }
   
   &--small {
-    width: 40rpx;
-    height: 40rpx;
-    font-size: 20rpx;
+    width: 60rpx;
+    height: 60rpx;
+    font-size: 32rpx;
   }
 }
 
 .quantity-input {
-  width: 70rpx;
-  height: 44rpx;
+  width: 90rpx;
+  height: 60rpx;
   text-align: center;
-  font-size: 24rpx;
+  font-size: 32rpx;
   font-weight: 500;
   background: #fff;
   border: 1rpx solid $border-color;
   border-radius: 6rpx;
   
   &--small {
-    width: 60rpx;
-    height: 40rpx;
-    font-size: 22rpx;
+    width: 90rpx;
+    height: 60rpx;
+    font-size: 32rpx;
   }
+}
+
+.quantity-unit {
+  font-size: 24rpx;
+  color: $text-secondary;
+  margin: 0 4rpx;
+}
+
+// 赠品类型选择样式
+.gift-type-select {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.gift-type-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx;
+  background: $bg-grey;
+  border-radius: $border-radius;
+  border: 2rpx solid transparent;
+  transition: all $transition-fast;
+  
+  &--active {
+    background: rgba($primary-color, 0.08);
+    border-color: $primary-color;
+  }
+  
+  &__left {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+  }
+  
+  &__check {
+    width: 36rpx;
+    height: 36rpx;
+    border-radius: 50%;
+    border: 2rpx solid $border-color;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 16rpx;
+    font-size: 20rpx;
+    color: #fff;
+    flex-shrink: 0;
+    
+    .gift-type-item--active & {
+      background: $primary-color;
+      border-color: $primary-color;
+    }
+  }
+  
+  &__info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4rpx;
+  }
+  
+  &__name {
+    font-size: 28rpx;
+    font-weight: 500;
+    color: $text-primary;
+  }
+  
+  &__products {
+    font-size: 24rpx;
+    color: $text-secondary;
+  }
+  
+  &__quantity {
+    margin-left: 16rpx;
+    flex-shrink: 0;
+  }
+}
+
+.product-select-label {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: $text-primary;
+  margin-bottom: 12rpx;
+  display: block;
 }
 
 .product-select-item--in-group {
@@ -607,6 +770,96 @@ const savePromotion = async () => {
   border-radius: 4rpx;
   font-size: 20rpx;
   margin-left: 12rpx;
+}
+
+.group-select-section {
+  margin-bottom: 32rpx;
+  padding: 20rpx;
+  background: rgba($primary-color, 0.03);
+  border-radius: $border-radius;
+  border: 1rpx solid rgba($primary-color, 0.1);
+}
+
+.group-select-label {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: $text-primary;
+  margin-bottom: 16rpx;
+  display: block;
+}
+
+.group-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.group-select-item {
+  display: flex;
+  align-items: center;
+  padding: 20rpx;
+  background: #fff;
+  border-radius: $border-radius;
+  border: 2rpx solid $border-color;
+  
+  &--active {
+    background: rgba($primary-color, 0.05);
+    border-color: $primary-color;
+  }
+  
+  &__check {
+    width: 40rpx;
+    height: 40rpx;
+    border-radius: 8rpx;
+    border: 2rpx solid $border-color;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 16rpx;
+    background: #fff;
+    flex-shrink: 0;
+    
+    text {
+      font-size: 28rpx;
+      color: $primary-color;
+      font-weight: 700;
+    }
+  }
+  
+  &__info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4rpx;
+  }
+  
+  &__name {
+    font-size: 28rpx;
+    font-weight: 500;
+    color: $text-primary;
+  }
+  
+  &__products {
+    font-size: 24rpx;
+    color: $text-secondary;
+  }
+}
+
+.group-select-actions {
+  margin-top: 16rpx;
+}
+
+.group-select-btn {
+  padding: 12rpx 24rpx;
+  background: $bg-grey;
+  color: $text-secondary;
+  border-radius: $border-radius;
+  text-align: center;
+  font-size: 26rpx;
+  
+  &:active {
+    opacity: 0.8;
+  }
 }
 
 .group-target-section {

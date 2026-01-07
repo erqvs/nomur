@@ -60,10 +60,10 @@ const upload = multer({
 
 // 数据库连接池
 const pool = mysql.createPool({
-  host: '8.154.33.100',
+  host: 'localhost',  // 使用本机 MySQL
   port: 3306,
   user: 'root',
-  password: 'Xk9mP2vL5nQ8wR3jF6yH1bT4cU7eA0sDzGqW',
+  password: '',  // 本机 MySQL root 密码为空或需要设置
   database: 'nomur',
   waitForConnections: true,
   connectionLimit: 10,
@@ -1841,7 +1841,8 @@ app.get('/api/agents/:id/statistics', async (req, res) => {
           let displayName = ''
           if (group.groupId && groupsMap.has(group.groupId)) {
             // 使用产品组合的名称
-            displayName = groupsMap.get(group.groupId)!.name
+            const groupData = groupsMap.get(group.groupId)
+            displayName = groupData ? groupData.name : ''
           } else {
             // 使用产品名称拼接
             displayName = group.products.map(pid => productsMap.get(pid) || pid).join(' + ')

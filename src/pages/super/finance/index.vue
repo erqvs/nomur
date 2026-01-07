@@ -54,23 +54,29 @@
               </text>
             </view>
           </view>
-          <text 
-            class="transaction-card__amount"
-            :class="{ 
-              'amount-positive': tx.amount > 0,
-              'amount-negative': tx.amount < 0
-            }"
-          >
-            {{ tx.amount > 0 ? '+' : '' }}¥{{ Math.abs(tx.amount).toLocaleString() }}
-          </text>
+          <view class="transaction-card__right">
+            <text 
+              class="transaction-card__amount"
+              :class="{ 
+                'amount-positive': tx.amount > 0,
+                'amount-negative': tx.amount < 0
+              }"
+            >
+              {{ tx.amount > 0 ? '+' : '' }}¥{{ Math.abs(tx.amount).toLocaleString() }}
+            </text>
+            <!-- 凭证缩略图 -->
+            <view v-if="tx.proof" class="transaction-card__proof-thumbnail" @tap.stop="previewProof(tx.proof)">
+              <image :src="tx.proof" class="proof-thumbnail-img" mode="aspectFill" />
+              <view class="proof-thumbnail-badge">
+                <image src="/static/icons/eye.svg" class="proof-badge-icon" mode="aspectFit" />
+              </view>
+            </view>
+          </view>
         </view>
         
         <view class="transaction-card__footer">
           <view class="transaction-card__time-wrapper">
             <text class="transaction-card__time">{{ formatTime(tx.createdAt) }}</text>
-            <view v-if="tx.proof" class="transaction-card__proof-badge" @tap.stop="previewProof(tx.proof)">
-              <text class="proof-badge-text">📷 查看凭证</text>
-            </view>
           </view>
           <view class="transaction-card__edit-btn" @tap.stop="editTransaction(tx)">
             <text class="edit-btn-text">✏️ 修改</text>
@@ -84,40 +90,9 @@
       </view>
     </view>
     
-    <!-- 修改交易记录弹窗 -->
-    <view v-if="showEditModal" class="modal-mask" @tap="closeEditModal">
-      <view class="modal-content" @tap.stop>
-        <text class="modal-title">修改交易记录</text>
-        <view class="modal-form">
-          <view class="form-item">
-            <text class="form-item__label">金额 <text class="required">*</text></text>
-            <input
-              v-model.number="editForm.amount"
-              type="number"
-              class="form-item__input"
-              placeholder="请输入金额（正数为充值，负数为扣款）"
-            />
-          </view>
-          <view class="form-item">
-            <text class="form-item__label">备注</text>
-            <textarea
-              v-model="editForm.remark"
-              class="form-item__textarea"
-              placeholder="请输入备注"
-              maxlength="200"
-            />
-          </view>
-        </view>
-        <view class="modal-actions">
-          <view class="modal-btn modal-btn--cancel" @tap="closeEditModal">取消</view>
-          <view class="modal-btn modal-btn--confirm" @tap="confirmEdit">确认修改</view>
-        </view>
-      </view>
-    </view>
+    <!-- 自定义TabBar -->
+    <CustomTabBar />
   </view>
-  
-  <!-- 自定义TabBar -->
-  <CustomTabBar />
 </template>
 
 <script setup lang="ts">
@@ -147,19 +122,27 @@ const filteredTransactions = computed(() => {
   return store.transactions.filter(t => t.type === currentFilter.value)
 })
 
-// 修改相关
-const showEditModal = ref(false)
-const editingTransaction = ref<Transaction | null>(null)
-const editForm = ref({
-  amount: 0,
-  remark: ''
-})
+
+// 更新 tabbar 路径
+const updateTabBarPath = () => {
+  try {
+    const pages = getCurrentPages()
+    if (pages.length > 0) {
+      const route = '/' + pages[pages.length - 1].route
+      uni.$emit('update-tabbar-path', route)
+    }
+  } catch (error) {
+    console.error('更新 tabbar 路径失败:', error)
+  }
+}
 
 onMounted(async () => {
+  updateTabBarPath()
   await store.loadTransactions()
 })
 
 onShow(async () => {
+  updateTabBarPath()
   await store.loadTransactions()
 })
 
@@ -217,54 +200,9 @@ const previewProof = (url: string) => {
 }
 
 const editTransaction = (tx: Transaction) => {
-  editingTransaction.value = tx
-  editForm.value = {
-    amount: tx.amount,
-    remark: tx.remark || ''
-  }
-  showEditModal.value = true
-}
-
-const closeEditModal = () => {
-  showEditModal.value = false
-  editingTransaction.value = null
-  editForm.value = { amount: 0, remark: '' }
-}
-
-const confirmEdit = async () => {
-  if (!editingTransaction.value) return
-  
-  if (!editForm.value.amount || editForm.value.amount === 0) {
-    uni.showToast({ title: '请输入有效的金额', icon: 'none' })
-    return
-  }
-  
-  if (!store.currentAdmin || store.currentAdmin.role !== 'super_admin') {
-    uni.showToast({ title: '需要超级管理员权限', icon: 'none' })
-    return
-  }
-  
-  try {
-    await transactionApi.update(
-      editingTransaction.value.id,
-      {
-        agentId: editingTransaction.value.agentId,
-        amount: editForm.value.amount,
-        reason: editingTransaction.value.reason,
-        remark: editForm.value.remark,
-        paymentAccountId: editingTransaction.value.paymentAccountId
-      },
-      store.currentAdmin.id,
-      store.currentAdmin.role
-    )
-    
-    uni.showToast({ title: '修改成功', icon: 'success' })
-    closeEditModal()
-    await store.loadTransactions()
-    await store.loadAgents() // 刷新代理商余额
-  } catch (error: any) {
-    uni.showToast({ title: error.message || '修改失败', icon: 'none' })
-  }
+  uni.navigateTo({
+    url: `/pages/super/transactions/edit?id=${tx.id}`
+  })
 }
 
 // 这些功能暂时不实现，直接跳转到管理端
@@ -278,7 +216,7 @@ const showTransferModal = ref(false)
 
 .finance-page {
   padding: 24rpx;
-  padding-bottom: 120rpx;
+  padding-bottom: calc(140rpx + env(safe-area-inset-bottom));
 }
 
 .quick-actions {
@@ -403,9 +341,34 @@ const showTransferModal = ref(false)
     margin-top: 8rpx;
   }
   
+  &__right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12rpx;
+  }
+  
   &__amount {
     font-size: 36rpx;
     font-weight: 700;
+    text-align: right;
+  }
+  
+  &__proof-thumbnail {
+    position: relative;
+    width: 100rpx;
+    height: 100rpx;
+    border-radius: 12rpx;
+    overflow: hidden;
+    border: 2rpx solid rgba($primary-color, 0.2);
+    background: $bg-grey;
+    box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.08);
+    transition: all 0.2s ease;
+    
+    &:active {
+      transform: scale(0.95);
+      box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.12);
+    }
   }
   
   &__footer {
@@ -464,10 +427,30 @@ const showTransferModal = ref(false)
   font-weight: 500;
 }
 
-.proof-badge-text {
-  font-size: 20rpx;
-  color: $primary-color;
-  line-height: 1.4;
+.proof-thumbnail-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.proof-thumbnail-badge {
+  position: absolute;
+  top: 4rpx;
+  right: 4rpx;
+  width: 32rpx;
+  height: 32rpx;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4rpx);
+}
+
+.proof-badge-icon {
+  width: 18rpx;
+  height: 18rpx;
+  filter: brightness(0) invert(1);
 }
 
 .order-item-tag {

@@ -1644,19 +1644,19 @@ const confirmDeleteAgent = () => {
 }
 
 .quantity-input {
-  width: 70rpx;
-  height: 44rpx;
+  width: 90rpx;
+  height: 60rpx;
   text-align: center;
-  font-size: 24rpx;
+  font-size: 32rpx;
   font-weight: 500;
   background: #fff;
   border: 1rpx solid $border-color;
   border-radius: 6rpx;
   
   &--small {
-    width: 60rpx;
-    height: 40rpx;
-    font-size: 22rpx;
+    width: 90rpx;
+    height: 60rpx;
+    font-size: 32rpx;
   }
 }
 </style>

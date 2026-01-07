@@ -122,7 +122,8 @@ const setQuickValue = (num: number) => {
   &__wrapper {
     display: flex;
     align-items: center;
-    padding: 24rpx;
+    padding: 32rpx;
+    min-height: 96rpx;
     background: $bg-grey;
     border-radius: $border-radius;
     border: 2rpx solid transparent;
@@ -136,14 +137,15 @@ const setQuickValue = (num: number) => {
   
   &__prefix {
     color: $text-secondary;
-    font-size: 28rpx;
+    font-size: 32rpx;
     margin-right: 12rpx;
   }
   
   &__input {
     flex: 1;
-    font-size: 32rpx;
+    font-size: 36rpx;
     color: $text-primary;
+    line-height: 1.5;
   }
   
   &__suffix {
@@ -153,8 +155,8 @@ const setQuickValue = (num: number) => {
   }
   
   &__clear {
-    width: 40rpx;
-    height: 40rpx;
+    width: 48rpx;
+    height: 48rpx;
     border-radius: 50%;
     background: $text-placeholder;
     display: flex;
@@ -165,7 +167,7 @@ const setQuickValue = (num: number) => {
   
   &__clear-icon {
     color: #fff;
-    font-size: 24rpx;
+    font-size: 28rpx;
     line-height: 1;
   }
   

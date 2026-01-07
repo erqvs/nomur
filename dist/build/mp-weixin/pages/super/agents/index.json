@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "代理管理",
+  "usingComponents": {
+    "custom-tab-bar": "../../../components/CustomTabBar/index"
+  }
+}

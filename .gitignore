@@ -5,6 +5,8 @@ node_modules/
 # 构建输出
 dist/
 build/
+# 例外：小程序构建产物需要提交到 Git，方便本地下载
+!dist/build/mp-weixin/
 *.log
 
 # 环境变量和配置

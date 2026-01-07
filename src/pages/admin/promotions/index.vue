@@ -657,12 +657,13 @@ const deletePromo = (id: string, e: any) => {
 
 .form-input {
   width: 100%;
-  height: 88rpx;
-  padding: 0 24rpx;
+  min-height: 96rpx;
+  padding: 0 32rpx;
   background: $bg-grey;
   border-radius: $border-radius;
-  font-size: 28rpx;
+  font-size: 36rpx;
   box-sizing: border-box;
+  line-height: 1.5;
 }
 
 .form-picker {
@@ -770,19 +771,19 @@ const deletePromo = (id: string, e: any) => {
 }
 
 .quantity-input {
-  width: 70rpx;
-  height: 44rpx;
+  width: 90rpx;
+  height: 60rpx;
   text-align: center;
-  font-size: 24rpx;
+  font-size: 32rpx;
   font-weight: 500;
   background: #fff;
   border: 1rpx solid $border-color;
   border-radius: 6rpx;
   
   &--small {
-    width: 60rpx;
-    height: 40rpx;
-    font-size: 22rpx;
+    width: 90rpx;
+    height: 60rpx;
+    font-size: 32rpx;
   }
 }
 

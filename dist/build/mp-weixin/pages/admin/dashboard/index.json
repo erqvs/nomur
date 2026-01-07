@@ -1,0 +1,7 @@
+{
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "数据驾驶舱",
+  "navigationBarBackgroundColor": "#2563EB",
+  "navigationBarTextStyle": "white",
+  "usingComponents": {}
+}

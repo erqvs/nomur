@@ -10,6 +10,7 @@
     {
       "path": "pages/admin/dashboard/index",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "数据驾驶舱",
         "navigationBarBackgroundColor": "#2563EB",
         "navigationBarTextStyle": "white"
@@ -152,6 +153,12 @@
       }
     },
     {
+      "path": "pages/super/orders/edit",
+      "style": {
+        "navigationBarTitleText": "修改订单"
+      }
+    },
+    {
       "path": "pages/super/finance/index",
       "style": {
         "navigationBarTitleText": "财务管理"
@@ -168,6 +175,12 @@
       "style": {
         "navigationBarTitleText": "收款人"
       }
+    },
+    {
+      "path": "pages/super/transactions/edit",
+      "style": {
+        "navigationBarTitleText": "修改交易记录"
+      }
     }
   ],
   "globalStyle": {
@@ -178,6 +191,7 @@
     "backgroundTextStyle": "dark"
   },
   "tabBar": {
+    "custom": true,
     "color": "#94A3B8",
     "selectedColor": "#2563EB",
     "backgroundColor": "#FFFFFF",
@@ -210,8 +224,8 @@
       {
         "pagePath": "pages/admin/payees/index",
         "text": "收款人",
-        "iconPath": "static/icons/credit-card.svg",
-        "selectedIconPath": "static/icons/credit-card-active.svg"
+        "iconPath": "static/icons/users.svg",
+        "selectedIconPath": "static/icons/users-active.svg"
       }
     ]
   },

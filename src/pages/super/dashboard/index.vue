@@ -110,11 +110,13 @@
       </view>
     </view>
     
+    <!-- 自定义TabBar -->
+    <CustomTabBar />
   </view>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAppStore } from '@/stores/app'
 import CustomTabBar from '@/components/CustomTabBar/index.vue'
@@ -124,8 +126,30 @@ const store = useAppStore()
 const globalStats = computed(() => store.globalStats)
 const agents = computed(() => store.agents)
 
+// 更新 tabbar 路径
+const updateTabBarPath = () => {
+  try {
+    const pages = getCurrentPages()
+    if (pages.length > 0) {
+      const route = '/' + pages[pages.length - 1].route
+      // 触发全局事件更新 tabbar
+      uni.$emit('update-tabbar-path', route)
+    }
+  } catch (error) {
+    console.error('更新 tabbar 路径失败:', error)
+  }
+}
+
+// 页面挂载时更新路径
+onMounted(() => {
+  updateTabBarPath()
+})
+
 // 页面显示时刷新数据（包括从其他页面返回时）
 onShow(async () => {
+  // 确保 tabbar 路径正确
+  updateTabBarPath()
+  
   await Promise.all([
     store.loadStatistics(),
     store.loadAgents()
@@ -190,7 +214,7 @@ const switchAccount = () => {
 <style lang="scss" scoped>
 .dashboard {
   padding: 24rpx;
-  padding-bottom: 32rpx;
+  padding-bottom: calc(140rpx + env(safe-area-inset-bottom)); // 为 tabbar 预留空间
 }
 
 .top-bar {

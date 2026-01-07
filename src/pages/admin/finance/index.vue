@@ -54,23 +54,29 @@
               </text>
             </view>
           </view>
-          <text 
-            class="transaction-card__amount"
-            :class="{ 
-              'amount-positive': tx.amount > 0,
-              'amount-negative': tx.amount < 0
-            }"
-          >
-            {{ tx.amount > 0 ? '+' : '' }}¥{{ Math.abs(tx.amount).toLocaleString() }}
-          </text>
+          <view class="transaction-card__right">
+            <text 
+              class="transaction-card__amount"
+              :class="{ 
+                'amount-positive': tx.amount > 0,
+                'amount-negative': tx.amount < 0
+              }"
+            >
+              {{ tx.amount > 0 ? '+' : '' }}¥{{ Math.abs(tx.amount).toLocaleString() }}
+            </text>
+            <!-- 凭证缩略图 -->
+            <view v-if="tx.proof" class="transaction-card__proof-thumbnail" @tap.stop="previewProof(tx.proof)">
+              <image :src="tx.proof" class="proof-thumbnail-img" mode="aspectFill" />
+              <view class="proof-thumbnail-badge">
+                <image src="/static/icons/eye.svg" class="proof-badge-icon" mode="aspectFit" />
+              </view>
+            </view>
+          </view>
         </view>
         
         <view class="transaction-card__footer">
           <view class="transaction-card__time-wrapper">
             <text class="transaction-card__time">{{ formatTime(tx.createdAt) }}</text>
-            <view v-if="tx.proof" class="transaction-card__proof-badge" @tap.stop="previewProof(tx.proof)">
-              <text class="proof-badge-text">📷 查看凭证</text>
-            </view>
           </view>
         </view>
       </view>
@@ -126,6 +132,42 @@
               :options="paymentAccountOptions"
               :compact="true"
             />
+          </view>
+          
+          <!-- 产品赠送（仅在选择"其他"原因时显示） -->
+          <view v-if="rechargeForm.reason === 'other'" class="gift-products-section">
+            <text class="modal-label">产品赠送（可选，按类型组合）</text>
+            <text class="form-desc">选择产品类型，系统将从该类型下的产品中自动分配</text>
+            <view class="gift-type-select">
+              <view 
+                v-for="category in categorizedProducts"
+                :key="category.type"
+                class="gift-type-item"
+                :class="{ 'gift-type-item--active': isRechargeGiftTypeSelected(category.type) }"
+              >
+                <view class="gift-type-item__left" @tap="toggleRechargeGiftTypeSelection(category.type)">
+                  <view class="gift-type-item__check">
+                    <text v-if="isRechargeGiftTypeSelected(category.type)">✓</text>
+                  </view>
+                  <view class="gift-type-item__info">
+                    <text class="gift-type-item__name">{{ category.type }}</text>
+                    <text class="gift-type-item__products">{{ category.products.map(p => p.name).join('、') }}</text>
+                  </view>
+                </view>
+                <view v-if="isRechargeGiftTypeSelected(category.type)" class="gift-type-item__quantity" @tap.stop="stopPropagation">
+                  <view class="quantity-control">
+                    <view class="quantity-btn quantity-btn--small" @tap="changeRechargeGiftTypeQuantity(category.type, -1)">-</view>
+                    <input 
+                      type="number" 
+                      :value="getRechargeGiftTypeQuantity(category.type)" 
+                      class="quantity-input quantity-input--small"
+                      @input="(e: any) => setRechargeGiftTypeQuantity(category.type, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                    />
+                    <view class="quantity-btn quantity-btn--small" @tap="changeRechargeGiftTypeQuantity(category.type, 1)">+</view>
+                  </view>
+                </view>
+              </view>
+            </view>
           </view>
           
           <view class="form-item">
@@ -192,6 +234,38 @@
             </view>
           </view>
           
+          <!-- 发货扣款时显示产品选择 -->
+          <view v-if="deductForm.reason === 'shipping'">
+            <text class="modal-label">选择产品（可多选）</text>
+            <view class="product-select">
+              <view 
+                v-for="product in store.products" 
+                :key="product.id"
+                class="product-select-item"
+                :class="{ 'product-select-item--active': isDeductProductSelected(product.id) }"
+              >
+                <view class="product-select-item__left" @tap="selectDeductProduct(product.id)">
+                  <view class="product-select-item__check">
+                    <text v-if="isDeductProductSelected(product.id)">✓</text>
+                  </view>
+                  <text class="product-select-item__name">{{ product.name }}</text>
+                </view>
+                <view v-if="isDeductProductSelected(product.id)" class="product-select-item__quantity" @tap.stop="stopPropagation">
+                  <view class="quantity-control">
+                    <view class="quantity-btn quantity-btn--small" @tap="changeDeductQuantity(product.id, -1)">-</view>
+                    <input 
+                      type="number" 
+                      :value="getDeductProductQuantity(product.id)" 
+                      class="quantity-input quantity-input--small"
+                      @input="(e: any) => setDeductQuantity(product.id, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                    />
+                    <view class="quantity-btn quantity-btn--small" @tap="changeDeductQuantity(product.id, 1)">+</view>
+                  </view>
+                </view>
+              </view>
+            </view>
+          </view>
+          
           <view class="form-item">
             <text class="modal-label">{{ deductForm.reason === 'other' ? '扣款原因' : '备注（可选）' }}</text>
             <input 
@@ -206,8 +280,9 @@
             label="扣款金额"
             type="digit"
             prefix="¥"
-            :showQuickNumbers="true"
+            :showQuickNumbers="deductForm.reason !== 'shipping'"
             :quickNumbers="[100, 500, 1000, 5000]"
+            :disabled="deductForm.reason === 'shipping'"
           />
         </view>
         
@@ -239,30 +314,30 @@
             :compact="true"
           />
           
-          <text class="modal-label">选择产品</text>
+          <text class="modal-label">选择产品（可多选）</text>
           <view class="product-select">
             <view 
               v-for="product in store.products" 
               :key="product.id"
               class="product-select-item"
-              :class="{ 'product-select-item--active': transferForm.productId === product.id }"
+              :class="{ 'product-select-item--active': isTransferProductSelected(product.id) }"
             >
               <view class="product-select-item__left" @tap="selectTransferProduct(product.id)">
                 <view class="product-select-item__check">
-                  <text v-if="transferForm.productId === product.id">✓</text>
+                  <text v-if="isTransferProductSelected(product.id)">✓</text>
                 </view>
                 <text class="product-select-item__name">{{ product.name }}</text>
               </view>
-              <view v-if="transferForm.productId === product.id" class="product-select-item__quantity" @tap.stop="stopPropagation">
+              <view v-if="isTransferProductSelected(product.id)" class="product-select-item__quantity" @tap.stop="stopPropagation">
                 <view class="quantity-control">
-                  <view class="quantity-btn quantity-btn--small" @tap="changeTransferQuantity(-1)">-</view>
+                  <view class="quantity-btn quantity-btn--small" @tap="changeTransferQuantity(product.id, -1)">-</view>
                   <input 
                     type="number" 
-                    :value="transferForm.quantity" 
+                    :value="getTransferProductQuantity(product.id)" 
                     class="quantity-input quantity-input--small"
-                    @input="(e: any) => setTransferQuantity(Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                    @input="(e: any) => setTransferQuantity(product.id, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
                   />
-                  <view class="quantity-btn quantity-btn--small" @tap="changeTransferQuantity(1)">+</view>
+                  <view class="quantity-btn quantity-btn--small" @tap="changeTransferQuantity(product.id, 1)">+</view>
                 </view>
               </view>
             </view>
@@ -413,6 +488,76 @@ const rechargeForm = ref({
   paymentAccountId: null as string | null
 })
 
+// 产品类型组合（用于充值赠送）
+interface ProductTypeGroup {
+  type: string
+  quantity: number
+  productIds: string[]
+}
+const rechargeGiftTypeGroups = ref<ProductTypeGroup[]>([])
+
+// 产品分类（用于组合选择）
+const categorizedProducts = computed(() => {
+  const categories: { [key: string]: { type: string; products: any[] } } = {}
+  store.products.forEach(p => {
+    let type = '其他'
+    if (p.name.includes('芒果')) {
+      type = '芒果类'
+    } else if (p.name.includes('茶')) {
+      type = '茶类'
+    } else if (p.name.includes('龙眼') || p.name.includes('水果')) {
+      type = '水果类'
+    }
+
+    if (!categories[type]) {
+      categories[type] = { type, products: [] }
+    }
+    categories[type].products.push(p)
+  })
+  return Object.values(categories)
+})
+
+// 产品类型选择相关方法（充值赠送）
+const isRechargeGiftTypeSelected = (type: string) => {
+  return rechargeGiftTypeGroups.value.some(g => g.type === type)
+}
+
+const toggleRechargeGiftTypeSelection = (type: string) => {
+  uni.vibrateShort({ type: 'light' })
+  const index = rechargeGiftTypeGroups.value.findIndex(g => g.type === type)
+  if (index > -1) {
+    rechargeGiftTypeGroups.value.splice(index, 1)
+  } else {
+    const category = categorizedProducts.value.find(c => c.type === type)
+    if (category) {
+      rechargeGiftTypeGroups.value.push({
+        type,
+        quantity: 1,
+        productIds: category.products.map(p => p.id)
+      })
+    }
+  }
+}
+
+const getRechargeGiftTypeQuantity = (type: string) => {
+  const group = rechargeGiftTypeGroups.value.find(g => g.type === type)
+  return group?.quantity || 0
+}
+
+const setRechargeGiftTypeQuantity = (type: string, quantity: number) => {
+  const group = rechargeGiftTypeGroups.value.find(g => g.type === type)
+  if (group) {
+    group.quantity = Math.max(1, quantity || 1)
+  }
+}
+
+const changeRechargeGiftTypeQuantity = (type: string, delta: number) => {
+  const group = rechargeGiftTypeGroups.value.find(g => g.type === type)
+  if (group) {
+    group.quantity = Math.max(1, group.quantity + delta)
+  }
+}
+
 // 收款账户列表（用于充值表单选择）
 const paymentAccounts = ref<Array<{ id: string; name: string; balance?: number }>>([])
 
@@ -453,12 +598,17 @@ onMounted(() => {
 // 选择充值原因
 const selectRechargeReason = (reason: 'payment' | 'freight' | 'other') => {
   rechargeForm.value.reason = reason
+  // 切换原因时，如果不是"其他"，清空产品赠送选择
+  if (reason !== 'other') {
+    rechargeGiftTypeGroups.value = []
+  }
 }
 
 // 扣款表单
 const deductForm = ref({
   agentId: null as string | null,
   reason: 'shipping' as 'shipping' | 'other',
+  items: [] as Array<{ productId: string; quantity: number }>,
   amount: 0,
   remark: ''
 })
@@ -469,50 +619,132 @@ const selectDeductReason = (reason: 'shipping' | 'other') => {
   if (reason !== 'other') {
     deductForm.value.remark = ''
   }
+  // 切换原因时清空产品选择
+  if (reason === 'other') {
+    deductForm.value.items = []
+  }
+}
+
+// 选择扣款产品（支持多选，仅发货扣款时使用）
+const selectDeductProduct = (productId: string) => {
+  uni.vibrateShort({ type: 'light' })
+  const index = deductForm.value.items.findIndex(item => item.productId === productId)
+  if (index > -1) {
+    // 已选中，取消选择
+    deductForm.value.items.splice(index, 1)
+  } else {
+    // 未选中，添加选择
+    deductForm.value.items.push({
+      productId,
+      quantity: 10
+    })
+  }
+  // 自动计算金额
+  updateDeductAmount()
+}
+
+// 判断产品是否已选中
+const isDeductProductSelected = (productId: string) => {
+  return deductForm.value.items.some(item => item.productId === productId)
+}
+
+// 获取产品的数量
+const getDeductProductQuantity = (productId: string) => {
+  const item = deductForm.value.items.find(item => item.productId === productId)
+  return item?.quantity || 0
+}
+
+// 修改扣款数量
+const changeDeductQuantity = (productId: string, delta: number) => {
+  const item = deductForm.value.items.find(item => item.productId === productId)
+  if (item) {
+    item.quantity = Math.max(1, item.quantity + delta)
+    updateDeductAmount()
+  }
+}
+
+// 设置扣款数量
+const setDeductQuantity = (productId: string, value: number) => {
+  const item = deductForm.value.items.find(item => item.productId === productId)
+  if (item) {
+    item.quantity = Math.max(1, value || 1)
+    updateDeductAmount()
+  }
+}
+
+// 自动计算扣款金额（基于选中的产品）
+const updateDeductAmount = () => {
+  const total = deductForm.value.items.reduce((sum, item) => {
+    const product = store.products.find(p => p.id === item.productId)
+    if (product) {
+      return sum + (product.price * item.quantity)
+    }
+    return sum
+  }, 0)
+  deductForm.value.amount = total
 }
 
 // 调货表单
 const transferForm = ref({
   fromAgentId: null as string | null,
   toAgentId: null as string | null,
-  productId: null as string | null,
-  quantity: 0,
+  items: [] as Array<{ productId: string; quantity: number }>,
   discount: 0,
   remark: ''
 })
 
-// 选择调货产品
+// 选择调货产品（支持多选）
 const selectTransferProduct = (productId: string) => {
   uni.vibrateShort({ type: 'light' })
-  if (transferForm.value.productId === productId) {
-    transferForm.value.productId = null
-    transferForm.value.quantity = 0
+  const index = transferForm.value.items.findIndex(item => item.productId === productId)
+  if (index > -1) {
+    // 已选中，取消选择
+    transferForm.value.items.splice(index, 1)
   } else {
-    transferForm.value.productId = productId
-    transferForm.value.quantity = transferForm.value.quantity || 10
+    // 未选中，添加选择
+    transferForm.value.items.push({
+      productId,
+      quantity: 10
+    })
   }
 }
 
+// 判断产品是否已选中
+const isTransferProductSelected = (productId: string) => {
+  return transferForm.value.items.some(item => item.productId === productId)
+}
+
+// 获取产品的数量
+const getTransferProductQuantity = (productId: string) => {
+  const item = transferForm.value.items.find(item => item.productId === productId)
+  return item?.quantity || 0
+}
+
 // 修改调货数量
-const changeTransferQuantity = (delta: number) => {
-  transferForm.value.quantity = Math.max(1, transferForm.value.quantity + delta)
+const changeTransferQuantity = (productId: string, delta: number) => {
+  const item = transferForm.value.items.find(item => item.productId === productId)
+  if (item) {
+    item.quantity = Math.max(1, item.quantity + delta)
+  }
 }
 
 // 设置调货数量
-const setTransferQuantity = (value: number) => {
-  transferForm.value.quantity = Math.max(1, value || 1)
+const setTransferQuantity = (productId: string, value: number) => {
+  const item = transferForm.value.items.find(item => item.productId === productId)
+  if (item) {
+    item.quantity = Math.max(1, value || 1)
+  }
 }
 
-// 选中产品的单价
-const selectedProductPrice = computed(() => {
-  if (!transferForm.value.productId) return 0
-  const product = store.products.find(p => p.id === transferForm.value.productId)
-  return product?.price || 0
-})
-
-// 调货小计
+// 调货小计（所有产品的总金额）
 const transferSubtotal = computed(() => {
-  return selectedProductPrice.value * transferForm.value.quantity
+  return transferForm.value.items.reduce((total, item) => {
+    const product = store.products.find(p => p.id === item.productId)
+    if (product) {
+      return total + (product.price * item.quantity)
+    }
+    return total
+  }, 0)
 })
 
 // 调货总额（减去优惠）
@@ -654,8 +886,8 @@ const confirmRecharge = async () => {
     uni.showToast({ title: '请选择代理', icon: 'none' })
     return
   }
-  if (!rechargeForm.value.amount) {
-    uni.showToast({ title: '请输入金额', icon: 'none' })
+  if (!rechargeForm.value.amount && rechargeGiftTypeGroups.value.length === 0) {
+    uni.showToast({ title: '请输入金额或选择赠送产品', icon: 'none' })
     return
   }
   if (rechargeForm.value.reason === 'payment' && !rechargeForm.value.paymentAccountId) {
@@ -666,20 +898,86 @@ const confirmRecharge = async () => {
   try {
     const finalReason = rechargeForm.value.reason === 'other' ? 'gift' : rechargeForm.value.reason
     
-    await store.recharge(
-      rechargeForm.value.agentId,
-      rechargeForm.value.amount,
-      finalReason,
-      rechargeForm.value.proof[0],
-      rechargeForm.value.remark || undefined,
-      rechargeForm.value.paymentAccountId || undefined
-    )
+    // 如果有金额，先进行充值
+    if (rechargeForm.value.amount > 0) {
+      await store.recharge(
+        rechargeForm.value.agentId,
+        rechargeForm.value.amount,
+        finalReason,
+        rechargeForm.value.proof[0],
+        rechargeForm.value.remark || undefined,
+        rechargeForm.value.paymentAccountId || undefined
+      )
+    }
     
-    uni.showToast({ title: '充值成功', icon: 'success' })
+    // 如果有产品赠送，创建订单
+    if (rechargeGiftTypeGroups.value.length > 0) {
+      const agent = store.agents.find(a => a.id === rechargeForm.value.agentId)
+      if (!agent) {
+        throw new Error('代理不存在')
+      }
+      
+      // 根据类型组合生成订单项（随机分配）
+      const orderItems: any[] = []
+      rechargeGiftTypeGroups.value.forEach(group => {
+        if (group.productIds.length === 0) return
+        
+        const availableProducts = store.products.filter(p => group.productIds.includes(p.id))
+        if (availableProducts.length === 0) return
+        
+        // 随机分配到类型下的产品
+        let remainingQuantity = group.quantity
+        const distribution: Record<string, number> = {}
+        
+        while (remainingQuantity > 0) {
+          const randomProduct = availableProducts[Math.floor(Math.random() * availableProducts.length)]
+          const qtyToAdd = Math.min(remainingQuantity, Math.floor(Math.random() * remainingQuantity) + 1)
+          
+          distribution[randomProduct.id] = (distribution[randomProduct.id] || 0) + qtyToAdd
+          remainingQuantity -= qtyToAdd
+        }
+        
+        // 添加到订单项
+        Object.entries(distribution).forEach(([productId, quantity]) => {
+          const product = store.products.find(p => p.id === productId)
+          if (product) {
+            const existingItem = orderItems.find(item => item.productId === productId)
+            if (existingItem) {
+              existingItem.quantity += quantity
+            } else {
+              orderItems.push({
+                productId: product.id,
+                productName: product.name,
+                quantity,
+                price: product.price,
+                weight: product.weight
+              })
+            }
+          }
+        })
+      })
+      
+      if (orderItems.length > 0) {
+        const totalWeight = orderItems.reduce((sum, item) => sum + item.quantity * item.weight, 0)
+        const totalAmount = orderItems.reduce((sum, item) => sum + item.quantity * item.price, 0)
+        
+        await store.createOrder({
+          agentId: rechargeForm.value.agentId!,
+          agentName: agent.name,
+          items: orderItems,
+          totalWeight,
+          totalAmount,
+          images: rechargeForm.value.proof.length > 0 ? rechargeForm.value.proof : undefined
+        })
+      }
+    }
+    
+    uni.showToast({ title: '操作成功', icon: 'success' })
     showRechargeModal.value = false
     rechargeForm.value = { agentId: null, reason: 'payment', amount: 0, proof: [], remark: '', paymentAccountId: null }
+    rechargeGiftTypeGroups.value = []
   } catch (error: any) {
-    uni.showToast({ title: error.message || '充值失败', icon: 'none' })
+    uni.showToast({ title: error.message || '操作失败', icon: 'none' })
   }
 }
 
@@ -689,7 +987,21 @@ const confirmDeduct = async () => {
     uni.showToast({ title: '请选择代理', icon: 'none' })
     return
   }
-  if (!deductForm.value.amount) {
+  if (deductForm.value.reason === 'shipping') {
+    // 发货扣款需要选择产品
+    if (deductForm.value.items.length === 0) {
+      uni.showToast({ title: '请至少选择一个产品', icon: 'none' })
+      return
+    }
+    // 验证每个产品的数量
+    for (const item of deductForm.value.items) {
+      if (!item.quantity || item.quantity <= 0) {
+        uni.showToast({ title: '请设置所有产品的数量', icon: 'none' })
+        return
+      }
+    }
+  }
+  if (!deductForm.value.amount || deductForm.value.amount <= 0) {
     uni.showToast({ title: '请输入金额', icon: 'none' })
     return
   }
@@ -704,16 +1016,31 @@ const confirmDeduct = async () => {
       ? deductForm.value.remark 
       : (deductForm.value.remark || undefined)
     
+    // 构建订单项数组（仅发货扣款时使用）
+    const orderItems = deductForm.value.reason === 'shipping' && deductForm.value.items.length > 0
+      ? deductForm.value.items.map(item => {
+          const product = store.products.find(p => p.id === item.productId)
+          return {
+            productId: item.productId,
+            productName: product?.name || '',
+            quantity: item.quantity,
+            price: product?.price || 0,
+            weight: product?.weight || 0
+          }
+        })
+      : undefined
+    
     await store.deduct(
       deductForm.value.agentId,
       deductForm.value.amount,
       reason,
-      remark
+      remark,
+      orderItems
     )
     
     uni.showToast({ title: '扣款成功', icon: 'success' })
     showDeductModal.value = false
-    deductForm.value = { agentId: null, reason: 'shipping', amount: 0, remark: '' }
+    deductForm.value = { agentId: null, reason: 'shipping', items: [], amount: 0, remark: '' }
   } catch (error: any) {
     uni.showToast({ title: error.message || '扣款失败', icon: 'none' })
   }
@@ -732,13 +1059,16 @@ const confirmTransfer = async () => {
     uni.showToast({ title: '发货方和收货方不能相同', icon: 'none' })
     return
   }
-  if (!transferForm.value.productId) {
-    uni.showToast({ title: '请选择产品', icon: 'none' })
+  if (transferForm.value.items.length === 0) {
+    uni.showToast({ title: '请至少选择一个产品', icon: 'none' })
     return
   }
-  if (!transferForm.value.quantity || transferForm.value.quantity <= 0) {
-    uni.showToast({ title: '请输入数量', icon: 'none' })
-    return
+  // 验证每个产品的数量
+  for (const item of transferForm.value.items) {
+    if (!item.quantity || item.quantity <= 0) {
+      uni.showToast({ title: '请设置所有产品的数量', icon: 'none' })
+      return
+    }
   }
   if (transferTotal.value <= 0) {
     uni.showToast({ title: '调货金额必须大于0', icon: 'none' })
@@ -746,18 +1076,29 @@ const confirmTransfer = async () => {
   }
   
   try {
+    // 构建订单项数组
+    const orderItems = transferForm.value.items.map(item => {
+      const product = store.products.find(p => p.id === item.productId)
+      return {
+        productId: item.productId,
+        productName: product?.name || '',
+        quantity: item.quantity,
+        price: product?.price || 0,
+        weight: product?.weight || 0
+      }
+    })
+    
     await store.transfer(
       transferForm.value.fromAgentId,
       transferForm.value.toAgentId,
       transferTotal.value,
-      transferForm.value.productId || undefined,
-      transferForm.value.quantity || undefined,
+      orderItems,
       transferForm.value.remark || undefined
     )
     
     uni.showToast({ title: '调货成功', icon: 'success' })
     showTransferModal.value = false
-    transferForm.value = { fromAgentId: null, toAgentId: null, productId: null, quantity: 0, discount: 0, remark: '' }
+    transferForm.value = { fromAgentId: null, toAgentId: null, items: [], discount: 0, remark: '' }
   } catch (error: any) {
     uni.showToast({ title: error.message || '调货失败', icon: 'none' })
   }
@@ -894,9 +1235,34 @@ const confirmTransfer = async () => {
     margin-top: 8rpx;
   }
   
+  &__right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12rpx;
+  }
+  
   &__amount {
     font-size: 36rpx;
     font-weight: 700;
+    text-align: right;
+  }
+  
+  &__proof-thumbnail {
+    position: relative;
+    width: 100rpx;
+    height: 100rpx;
+    border-radius: 12rpx;
+    overflow: hidden;
+    border: 2rpx solid rgba($primary-color, 0.2);
+    background: $bg-grey;
+    box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.08);
+    transition: all 0.2s ease;
+    
+    &:active {
+      transform: scale(0.95);
+      box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.12);
+    }
   }
   
   &__footer {
@@ -938,10 +1304,30 @@ const confirmTransfer = async () => {
   }
 }
 
-.proof-badge-text {
-  font-size: 20rpx;
-  color: $primary-color;
-  line-height: 1.4;
+.proof-thumbnail-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.proof-thumbnail-badge {
+  position: absolute;
+  top: 4rpx;
+  right: 4rpx;
+  width: 32rpx;
+  height: 32rpx;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4rpx);
+}
+
+.proof-badge-icon {
+  width: 18rpx;
+  height: 18rpx;
+  filter: brightness(0) invert(1);
 }
 
 .order-item-tag {
@@ -1221,11 +1607,98 @@ const confirmTransfer = async () => {
   }
 }
 
+// 表单描述文字
+.form-desc {
+  font-size: 24rpx;
+  color: $text-secondary;
+  margin-bottom: 16rpx;
+  line-height: 1.5;
+}
+
+// 产品赠送区域
+.gift-products-section {
+  margin-top: 16rpx;
+  margin-bottom: 16rpx;
+}
+
 // 产品选择样式（与开单页面一致）
 .product-select {
   display: flex;
   flex-direction: column;
   gap: 12rpx;
+}
+
+.gift-type-select {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  margin-top: 16rpx;
+}
+
+.gift-type-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx;
+  background: $bg-grey;
+  border-radius: $border-radius;
+  border: 2rpx solid transparent;
+  transition: all $transition-fast;
+  
+  &--active {
+    background: rgba($primary-color, 0.08);
+    border-color: $primary-color;
+  }
+  
+  &__left {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+  }
+  
+  &__check {
+    width: 36rpx;
+    height: 36rpx;
+    border-radius: 50%;
+    border: 2rpx solid $border-color;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 16rpx;
+    font-size: 20rpx;
+    color: #fff;
+    flex-shrink: 0;
+    
+    .gift-type-item--active & {
+      background: $primary-color;
+      border-color: $primary-color;
+    }
+  }
+  
+  &__info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4rpx;
+  }
+  
+  &__name {
+    font-size: 28rpx;
+    font-weight: 500;
+    color: $text-primary;
+  }
+  
+  &__products {
+    font-size: 24rpx;
+    color: $text-secondary;
+    line-height: 1.4;
+  }
+  
+  &__quantity {
+    margin-left: 16rpx;
+    flex-shrink: 0;
+  }
 }
 
 .product-select-item {
@@ -1289,15 +1762,15 @@ const confirmTransfer = async () => {
 }
 
 .quantity-btn {
-  width: 44rpx;
-  height: 44rpx;
+  width: 60rpx;
+  height: 60rpx;
   background: #fff;
   border: 1rpx solid $border-color;
   border-radius: 6rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22rpx;
+  font-size: 32rpx;
   font-weight: 500;
   color: $text-primary;
   
@@ -1306,26 +1779,26 @@ const confirmTransfer = async () => {
   }
   
   &--small {
-    width: 40rpx;
-    height: 40rpx;
-    font-size: 20rpx;
+    width: 60rpx;
+    height: 60rpx;
+    font-size: 32rpx;
   }
 }
 
 .quantity-input {
-  width: 70rpx;
-  height: 44rpx;
+  width: 90rpx;
+  height: 60rpx;
   text-align: center;
-  font-size: 24rpx;
+  font-size: 32rpx;
   font-weight: 500;
   background: #fff;
   border: 1rpx solid $border-color;
   border-radius: 6rpx;
   
   &--small {
-    width: 60rpx;
-    height: 40rpx;
-    font-size: 22rpx;
+    width: 90rpx;
+    height: 60rpx;
+    font-size: 32rpx;
   }
 }
 

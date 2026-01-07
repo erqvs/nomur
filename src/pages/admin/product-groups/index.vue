@@ -439,21 +439,26 @@ const confirmSave = async () => {
 
 .form-input {
   width: 100%;
-  padding: 24rpx;
+  padding: 32rpx;
+  min-height: 96rpx;
   background: $bg-grey;
   border-radius: $border-radius;
-  font-size: 28rpx;
+  font-size: 36rpx;
   color: $text-primary;
+  line-height: 1.5;
+  box-sizing: border-box;
 }
 
 .form-textarea {
   width: 100%;
-  min-height: 120rpx;
-  padding: 24rpx;
+  min-height: 200rpx;
+  padding: 32rpx;
   background: $bg-grey;
   border-radius: $border-radius;
-  font-size: 28rpx;
+  font-size: 36rpx;
   color: $text-primary;
+  line-height: 1.5;
+  box-sizing: border-box;
 }
 
 .product-select {

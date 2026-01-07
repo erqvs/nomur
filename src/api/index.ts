@@ -1,5 +1,12 @@
 // API 请求封装
-const BASE_URL = '/api'
+// H5 走同域 Nginx 反代 (/api -> 127.0.0.1:3001)
+// 微信小程序端必须使用完整 HTTPS 域名（否则会被视为非法/无效 URL）
+const BASE_URL = (() => {
+  // #ifdef MP-WEIXIN
+  return 'https://100nomur.net/api'
+  // #endif
+  return '/api'
+})()
 
 interface ApiResponse<T = unknown> {
   code: number
@@ -9,7 +16,11 @@ interface ApiResponse<T = unknown> {
 
 // 通用请求方法
 // 注意：此函数不再自动显示toast，由调用方决定如何处理错误
-async function request<T>(url: string, options: UniApp.RequestOptions & { customHeader?: Record<string, string> } = {}): Promise<T> {
+type RequestOptionsWithoutUrl = Omit<UniApp.RequestOptions, 'url'> & {
+  customHeader?: Record<string, string>
+}
+
+async function request<T>(url: string, options: RequestOptionsWithoutUrl = {}): Promise<T> {
   const { customHeader, ...restOptions } = options
   return new Promise((resolve, reject) => {
     uni.request({
@@ -202,6 +213,7 @@ export const transactionApi = {
     remark?: string
     productId?: string
     quantity?: number
+    orderItems?: Array<{ productId: string; productName: string; quantity: number; price: number; weight: number }>
   }) => request<{ id: string }>('/transactions/deduct', { method: 'POST', data }),
   
   // 调货
@@ -211,6 +223,7 @@ export const transactionApi = {
     amount: number
     productId?: string
     quantity?: number
+    orderItems?: Array<{ productId: string; productName: string; quantity: number; price: number; weight: number }>
     remark?: string
   }) => request<{ inTxId: string; outTxId: string }>('/transactions/transfer', { method: 'POST', data }),
   
@@ -352,5 +365,16 @@ export const uploadApi = {
 }
 
 // 类型导入
-import type { Product, Agent, Driver, Promotion, Order, OrderItem, GiftItem, Transaction, ProductGroup } from '@/types'
+import type {
+  Product,
+  Agent,
+  Driver,
+  Promotion,
+  Order,
+  OrderItem,
+  GiftItem,
+  Transaction,
+  ProductGroup,
+  TransactionReason
+} from '@/types'
 

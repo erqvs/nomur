@@ -252,10 +252,10 @@
         </view>
       </view>
     </view>
+    
+    <!-- 自定义TabBar -->
+    <CustomTabBar />
   </view>
-  
-  <!-- 自定义TabBar -->
-  <CustomTabBar />
 </template>
 
 <script setup lang="ts">
@@ -573,11 +573,26 @@ const goToAgentDetail = (agentId: string) => {
   })
 }
 
+// 更新 tabbar 路径
+const updateTabBarPath = () => {
+  try {
+    const pages = getCurrentPages()
+    if (pages.length > 0) {
+      const route = '/' + pages[pages.length - 1].route
+      uni.$emit('update-tabbar-path', route)
+    }
+  } catch (error) {
+    console.error('更新 tabbar 路径失败:', error)
+  }
+}
+
 onMounted(() => {
+  updateTabBarPath()
   loadAccounts()
 })
 
 onShow(() => {
+  updateTabBarPath()
   loadAccounts()
 })
 </script>
