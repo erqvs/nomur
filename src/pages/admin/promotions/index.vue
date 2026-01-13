@@ -29,8 +29,8 @@
         </view>
         
         <view class="promotion-card__gifts">
-          <view v-for="gift in promo.gifts" :key="gift.productId" class="gift-tag">
-            {{ gift.productName }} x{{ gift.quantity }}
+          <view v-for="(gift, idx) in getDisplayGifts(promo.gifts)" :key="idx" class="gift-tag">
+            {{ gift.name }} x{{ gift.quantity }}
           </view>
         </view>
         
@@ -75,28 +75,35 @@
             />
           </view>
           
-          <view class="form-item">
-            <text class="form-label">满足条件（件）</text>
-            <input 
-              v-model.number="form.threshold" 
-              class="form-input" 
-              type="number"
-              placeholder="如：100"
-            />
-          </view>
-          
           <!-- 触发条件产品选择（支持组合） -->
           <view class="form-item">
-            <text class="form-label">触发条件产品（可组合选择）</text>
-            <view class="product-select">
+            <view class="section-header">
+              <text class="form-label">触发条件产品</text>
+              <view class="mode-switch">
+                <view 
+                  class="mode-switch__item"
+                  :class="{ 'mode-switch__item--active': !useConditionGroupMode }"
+                  @tap="useConditionGroupMode = false"
+                >
+                  单个
+                </view>
+                <view 
+                  class="mode-switch__item"
+                  :class="{ 'mode-switch__item--active': useConditionGroupMode }"
+                  @tap="useConditionGroupMode = true"
+                >
+                  组合
+                </view>
+              </view>
+            </view>
+            
+            <!-- 单个产品选择模式 -->
+            <view v-if="!useConditionGroupMode" class="product-select">
               <view 
                 v-for="product in products" 
                 :key="product.id"
                 class="product-select-item"
-                :class="{ 
-                  'product-select-item--active': isConditionProductSelected(product.id),
-                  'product-select-item--in-group': isConditionProductInGroup(product.id)
-                }"
+                :class="{ 'product-select-item--active': isConditionProductSelected(product.id) }"
               >
                 <view class="product-select-item__left" @tap="toggleConditionProductSelection(product.id)">
                   <view class="product-select-item__check">
@@ -104,30 +111,85 @@
                   </view>
                   <text class="product-select-item__name">{{ product.name }}</text>
                 </view>
-                <view v-if="isConditionProductInGroup(product.id)" class="product-select-item__group-badge">
-                  <text>组合</text>
+                <view v-if="isConditionProductSelected(product.id)" class="product-select-item__quantity" @tap.stop>
+                  <view class="quantity-control">
+                    <view class="quantity-btn quantity-btn--small" @tap="changeConditionProductQuantity(product.id, -1)">-</view>
+                    <input 
+                      type="number" 
+                      :value="getConditionProductQuantity(product.id)" 
+                      class="quantity-input quantity-input--small"
+                      @input="(e: any) => setConditionProductQuantity(product.id, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                    />
+                    <view class="quantity-btn quantity-btn--small" @tap="changeConditionProductQuantity(product.id, 1)">+</view>
+                  </view>
                 </view>
               </view>
             </view>
             
-            <!-- 组合设置 -->
-            <view v-if="selectedConditionProducts.length > 1" class="group-target-section">
-              <view class="group-target-header">
-                <text class="group-target-label">组合产品：{{ getSelectedProductsNames() }}</text>
-                <view class="group-target-actions">
-                  <view class="group-target-btn group-target-btn--cancel" @tap="clearConditionSelection">取消组合</view>
-                  <view class="group-target-btn group-target-btn--save" @tap="saveConditionGroup">保存组合</view>
-                </view>
+            <!-- 产品组合选择模式 -->
+            <view v-else class="product-group-select">
+              <text class="form-desc">选择产品组合作为触发条件</text>
+              <view v-if="conditionProductGroups.length === 0" class="empty-groups">
+                <text class="empty-text">暂无产品组合，请先在"组合管理"页面创建组合</text>
               </view>
-              <view class="group-target-tip">
-                <text>当这些产品的总数量达到 {{ form.threshold }} 件时，触发促销</text>
+              <view v-else class="group-select">
+                <view 
+                  v-for="group in conditionProductGroups"
+                  :key="group.id"
+                  class="group-select-item"
+                  :class="{ 'group-select-item--active': isConditionGroupSelected(group.id) }"
+                >
+                  <view class="group-select-item__left" @tap="toggleConditionGroupSelection(group.id)">
+                    <view class="group-select-item__check">
+                      <text v-if="isConditionGroupSelected(group.id)">✓</text>
+                    </view>
+                    <view class="group-select-item__info">
+                      <text class="group-select-item__name">{{ group.name }}</text>
+                      <text class="group-select-item__products">
+                        {{ getGroupProductNames(group.id).join('、') }}
+                      </text>
+                    </view>
+                  </view>
+                  <view v-if="isConditionGroupSelected(group.id)" class="group-select-item__quantity" @tap.stop>
+                    <view class="quantity-control">
+                      <view class="quantity-btn quantity-btn--small" @tap="changeConditionGroupQuantity(group.id, -1)">-</view>
+                      <input 
+                        type="number" 
+                        :value="getConditionGroupQuantity(group.id)" 
+                        class="quantity-input quantity-input--small"
+                        @input="(e: any) => setConditionGroupQuantity(group.id, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                      />
+                      <view class="quantity-btn quantity-btn--small" @tap="changeConditionGroupQuantity(group.id, 1)">+</view>
+                    </view>
+                  </view>
+                </view>
               </view>
             </view>
           </view>
           
           <view class="form-item">
-            <text class="form-label">赠品选择（可多选）</text>
-            <view class="product-select">
+            <view class="section-header">
+              <text class="form-label">赠品选择</text>
+              <view class="mode-switch">
+                <view 
+                  class="mode-switch__item"
+                  :class="{ 'mode-switch__item--active': !useGiftGroupMode }"
+                  @tap="useGiftGroupMode = false"
+                >
+                  单个
+                </view>
+                <view 
+                  class="mode-switch__item"
+                  :class="{ 'mode-switch__item--active': useGiftGroupMode }"
+                  @tap="useGiftGroupMode = true"
+                >
+                  组合
+                </view>
+              </view>
+            </view>
+            
+            <!-- 单个产品选择模式 -->
+            <view v-if="!useGiftGroupMode" class="product-select">
               <view 
                 v-for="product in products" 
                 :key="product.id"
@@ -137,19 +199,59 @@
                 <view class="product-select-item__left" @tap="toggleGiftSelection(product.id)">
                   <view class="product-select-item__check">
                     <text v-if="isGiftSelected(product.id)">✓</text>
-              </view>
+                  </view>
                   <text class="product-select-item__name">{{ product.name }}</text>
                 </view>
                 <view v-if="isGiftSelected(product.id)" class="product-select-item__quantity" @tap.stop>
                   <view class="quantity-control">
                     <view class="quantity-btn quantity-btn--small" @tap="changeGiftQuantity(getGiftIndex(product.id), -1)">-</view>
-                  <input 
-                    type="number"
+                    <input 
+                      type="number"
                       :value="getGiftQuantity(product.id)" 
                       class="quantity-input quantity-input--small"
                       @input="(e: any) => setGiftQuantity(product.id, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
-                  />
+                    />
                     <view class="quantity-btn quantity-btn--small" @tap="changeGiftQuantity(getGiftIndex(product.id), 1)">+</view>
+                  </view>
+                </view>
+              </view>
+            </view>
+            
+            <!-- 产品组合选择模式 -->
+            <view v-else class="product-group-select">
+              <text class="form-desc">选择产品组合作为赠品</text>
+              <view v-if="giftProductGroups.length === 0" class="empty-groups">
+                <text class="empty-text">暂无产品组合，请先在"组合管理"页面创建组合</text>
+              </view>
+              <view v-else class="group-select">
+                <view 
+                  v-for="group in giftProductGroups"
+                  :key="group.id"
+                  class="group-select-item"
+                  :class="{ 'group-select-item--active': isGiftGroupSelected(group.id) }"
+                >
+                  <view class="group-select-item__left" @tap="toggleGiftGroupSelection(group.id)">
+                    <view class="group-select-item__check">
+                      <text v-if="isGiftGroupSelected(group.id)">✓</text>
+                    </view>
+                    <view class="group-select-item__info">
+                      <text class="group-select-item__name">{{ group.name }}</text>
+                      <text class="group-select-item__products">
+                        {{ getGiftGroupProductNames(group.id).join('、') }}
+                      </text>
+                    </view>
+                  </view>
+                  <view v-if="isGiftGroupSelected(group.id)" class="group-select-item__quantity" @tap.stop>
+                    <view class="quantity-control">
+                      <view class="quantity-btn quantity-btn--small" @tap="changeGiftGroupQuantity(group.id, -1)">-</view>
+                      <input 
+                        type="number" 
+                        :value="getGiftGroupQuantity(group.id)" 
+                        class="quantity-input quantity-input--small"
+                        @input="(e: any) => setGiftGroupQuantity(group.id, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                      />
+                      <view class="quantity-btn quantity-btn--small" @tap="changeGiftGroupQuantity(group.id, 1)">+</view>
+                    </view>
                   </view>
                 </view>
               </view>
@@ -181,9 +283,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { promotionApi } from '@/api'
+import { promotionApi, productGroupApi } from '@/api'
+import type { ProductGroup } from '@/types'
 
 const store = useAppStore()
 
@@ -193,18 +296,47 @@ const products = computed(() => store.products)
 const showAddModal = ref(false)
 const isDatePickerOpen = ref(false)
 
+// 触发条件产品选择模式
+const useConditionGroupMode = ref(false)
+
+// 赠品选择模式
+const useGiftGroupMode = ref(false)
+
+// 产品组合列表（触发条件）
+const conditionProductGroups = ref<ProductGroup[]>([])
+
+// 产品组合列表（赠品）
+const giftProductGroups = ref<ProductGroup[]>([])
+
+// 选中的触发条件组合
+interface SelectedConditionGroup {
+  groupId: string
+  quantity: number
+}
+const selectedConditionGroups = ref<SelectedConditionGroup[]>([])
+
+// 选中的触发条件单个产品（带数量）
+interface SelectedConditionProduct {
+  productId: string
+  quantity: number
+}
+const selectedConditionProducts = ref<SelectedConditionProduct[]>([])
+
+// 选中的赠品组合
+interface SelectedGiftGroup {
+  groupId: string
+  quantity: number
+}
+const selectedGiftGroups = ref<SelectedGiftGroup[]>([])
+
 const form = ref({
   name: '',
   description: '',
-  threshold: 100,
-  conditionProducts: [] as string[], // 触发条件的产品ID列表（支持组合）
-  gifts: [] as Array<{ productId: string; quantity: number }>,
+  gifts: [] as Array<{ productId: string; quantity: number }>, // 赠品（单个产品模式）
+  giftGroups: [] as Array<{ groupId: string; quantity: number }>, // 赠品组合（组合模式）
   startDate: '',
   endDate: ''
 })
-
-// 选中的触发条件产品（用于组合选择）
-const selectedConditionProducts = ref<string[]>([])
 
 // 处理日期选择器的打开
 const handleDatePickerOpen = () => {
@@ -222,63 +354,147 @@ const handleDatePickerChange = () => {
 // 已选中的赠品产品ID列表
 const selectedGifts = computed(() => form.value.gifts.map(g => g.productId))
 
-// 触发条件产品相关方法
-const isConditionProductSelected = (productId: string) => {
-  return selectedConditionProducts.value.includes(productId) || form.value.conditionProducts.includes(productId)
+// 加载产品组合列表
+const loadConditionProductGroups = async () => {
+  try {
+    const groups = await productGroupApi.getAll()
+    conditionProductGroups.value = groups
+    giftProductGroups.value = groups
+  } catch (error) {
+    console.error('加载产品组合失败:', error)
+    uni.showToast({ title: '加载产品组合失败', icon: 'none' })
+  }
 }
 
-const isConditionProductInGroup = (productId: string) => {
-  return form.value.conditionProducts.includes(productId)
+// 触发条件产品相关方法（单个模式）
+const isConditionProductSelected = (productId: string) => {
+  return selectedConditionProducts.value.some(p => p.productId === productId)
 }
 
 const toggleConditionProductSelection = (productId: string) => {
   uni.vibrateShort({ type: 'light' })
-  const index = selectedConditionProducts.value.indexOf(productId)
+  const index = selectedConditionProducts.value.findIndex(p => p.productId === productId)
   if (index > -1) {
     selectedConditionProducts.value.splice(index, 1)
   } else {
-    // 如果产品已经在条件产品列表中，先移除
-    const conditionIndex = form.value.conditionProducts.indexOf(productId)
-    if (conditionIndex > -1) {
-      form.value.conditionProducts.splice(conditionIndex, 1)
-    }
-    selectedConditionProducts.value.push(productId)
+    selectedConditionProducts.value.push({
+      productId,
+      quantity: 100 // 默认100件
+    })
   }
 }
 
-const clearConditionSelection = () => {
-  selectedConditionProducts.value = []
+const getConditionProductQuantity = (productId: string) => {
+  const product = selectedConditionProducts.value.find(p => p.productId === productId)
+  return product?.quantity || 100
 }
 
-const getSelectedProductsNames = () => {
-  return selectedConditionProducts.value
-    .map(id => products.value.find(p => p.id === id)?.name || id)
-    .join(' + ')
-}
-
-const saveConditionGroup = () => {
-  if (selectedConditionProducts.value.length < 2) {
-    uni.showToast({ title: '请至少选择2个产品', icon: 'none' })
-    return
+const setConditionProductQuantity = (productId: string, quantity: number) => {
+  const product = selectedConditionProducts.value.find(p => p.productId === productId)
+  if (product) {
+    product.quantity = Math.max(1, quantity || 1)
   }
-  
-  // 移除已选产品在条件产品列表中的单独存在
-  selectedConditionProducts.value.forEach(productId => {
-    const index = form.value.conditionProducts.indexOf(productId)
-    if (index > -1) {
-      form.value.conditionProducts.splice(index, 1)
-    }
+}
+
+const changeConditionProductQuantity = (productId: string, delta: number) => {
+  const product = selectedConditionProducts.value.find(p => p.productId === productId)
+  if (product) {
+    product.quantity = Math.max(1, product.quantity + delta)
+  }
+}
+
+// 触发条件组合相关方法（组合模式）
+const isConditionGroupSelected = (groupId: string) => {
+  return selectedConditionGroups.value.some(g => g.groupId === groupId)
+}
+
+const toggleConditionGroupSelection = (groupId: string) => {
+  uni.vibrateShort({ type: 'light' })
+  const index = selectedConditionGroups.value.findIndex(g => g.groupId === groupId)
+  if (index > -1) {
+    selectedConditionGroups.value.splice(index, 1)
+  } else {
+    selectedConditionGroups.value.push({
+      groupId,
+      quantity: 100 // 默认100件
+    })
+  }
+}
+
+const getConditionGroupQuantity = (groupId: string) => {
+  const group = selectedConditionGroups.value.find(g => g.groupId === groupId)
+  return group?.quantity || 100
+}
+
+const setConditionGroupQuantity = (groupId: string, quantity: number) => {
+  const group = selectedConditionGroups.value.find(g => g.groupId === groupId)
+  if (group) {
+    group.quantity = Math.max(1, quantity || 1)
+  }
+}
+
+const changeConditionGroupQuantity = (groupId: string, delta: number) => {
+  const group = selectedConditionGroups.value.find(g => g.groupId === groupId)
+  if (group) {
+    group.quantity = Math.max(1, group.quantity + delta)
+  }
+}
+
+// 获取组合中的商品名称（触发条件）
+const getGroupProductNames = (groupId: string) => {
+  const group = conditionProductGroups.value.find(g => g.id === groupId)
+  if (!group) return []
+  return group.productIds.map(productId => {
+    const product = products.value.find(p => p.id === productId)
+    return product?.name || productId
   })
-  
-  // 添加组合产品到条件产品列表
-  selectedConditionProducts.value.forEach(productId => {
-    if (!form.value.conditionProducts.includes(productId)) {
-      form.value.conditionProducts.push(productId)
-    }
+}
+
+// 获取组合中的商品名称（赠品）
+const getGiftGroupProductNames = (groupId: string) => {
+  const group = giftProductGroups.value.find(g => g.id === groupId)
+  if (!group) return []
+  return group.productIds.map(productId => {
+    const product = products.value.find(p => p.id === productId)
+    return product?.name || productId
   })
-  
-  uni.showToast({ title: '组合已保存', icon: 'success' })
-  clearConditionSelection()
+}
+
+// 赠品组合相关方法
+const isGiftGroupSelected = (groupId: string) => {
+  return selectedGiftGroups.value.some(g => g.groupId === groupId)
+}
+
+const toggleGiftGroupSelection = (groupId: string) => {
+  uni.vibrateShort({ type: 'light' })
+  const index = selectedGiftGroups.value.findIndex(g => g.groupId === groupId)
+  if (index > -1) {
+    selectedGiftGroups.value.splice(index, 1)
+  } else {
+    selectedGiftGroups.value.push({
+      groupId,
+      quantity: 1 // 默认1箱
+    })
+  }
+}
+
+const getGiftGroupQuantity = (groupId: string) => {
+  const group = selectedGiftGroups.value.find(g => g.groupId === groupId)
+  return group?.quantity || 1
+}
+
+const setGiftGroupQuantity = (groupId: string, quantity: number) => {
+  const group = selectedGiftGroups.value.find(g => g.groupId === groupId)
+  if (group) {
+    group.quantity = Math.max(1, quantity || 1)
+  }
+}
+
+const changeGiftGroupQuantity = (groupId: string, delta: number) => {
+  const group = selectedGiftGroups.value.find(g => g.groupId === groupId)
+  if (group) {
+    group.quantity = Math.max(1, group.quantity + delta)
+  }
 }
 
 // 判断产品是否被选中
@@ -331,6 +547,55 @@ const formatDate = (dateString: string) => {
   }
 }
 
+// 处理赠品显示：如果是组合赠品，合并显示；如果是单个产品，正常显示
+const getDisplayGifts = (gifts: any[]) => {
+  if (!gifts || gifts.length === 0) return []
+  
+  // 检查是否有组合赠品（有 type 和 productIds 字段）
+  const hasGroupGifts = gifts.some(g => g.type && g.productIds && Array.isArray(g.productIds) && g.productIds.length > 0)
+  
+  if (hasGroupGifts) {
+    // 组合赠品：按 type 分组，合并显示
+    // 注意：同一个组合的多个产品项有相同的 type 和 quantity，所以只取第一个的数量
+    const groupMap = new Map<string, { name: string; quantity: number }>()
+    
+    gifts.forEach(gift => {
+      if (gift.type && gift.productIds && Array.isArray(gift.productIds) && gift.productIds.length > 0) {
+        // 这是组合赠品
+        if (!groupMap.has(gift.type)) {
+          // 第一次遇到这个组合，记录名称和数量
+          groupMap.set(gift.type, {
+            name: gift.type, // 组合名称
+            quantity: gift.quantity || 0
+          })
+        }
+      } else {
+        // 这是单个产品赠品
+        const key = gift.productId || gift.productName || ''
+        if (!groupMap.has(`single_${key}`)) {
+          groupMap.set(`single_${key}`, {
+            name: gift.productName || gift.productId || '',
+            quantity: gift.quantity || 0
+          })
+        } else {
+          // 如果同一个产品出现多次，累加数量
+          const existing = groupMap.get(`single_${key}`)!
+          existing.quantity += (gift.quantity || 0)
+        }
+      }
+    })
+    
+    // 转换为数组
+    return Array.from(groupMap.values())
+  } else {
+    // 没有组合赠品，正常显示每个产品
+    return gifts.map(gift => ({
+      name: gift.productName || gift.productId || '',
+      quantity: gift.quantity || 0
+    }))
+  }
+}
+
 // 获取赠品在数组中的索引
 const getGiftIndex = (productId: string) => {
   return form.value.gifts.findIndex(g => g.productId === productId)
@@ -370,35 +635,142 @@ const addPromotion = async () => {
     uni.showToast({ title: '请输入活动名称', icon: 'none' })
     return
   }
-  if (form.value.gifts.length === 0) {
+  
+  // 检查是否选择了触发条件
+  if (!useConditionGroupMode.value && selectedConditionProducts.value.length === 0) {
+    uni.showToast({ title: '请选择触发条件产品', icon: 'none' })
+    return
+  }
+  if (useConditionGroupMode.value && selectedConditionGroups.value.length === 0) {
+    uni.showToast({ title: '请选择触发条件组合', icon: 'none' })
+    return
+  }
+  
+  // 验证触发条件数量
+  if (!useConditionGroupMode.value) {
+    for (const product of selectedConditionProducts.value) {
+      if (!product.quantity || product.quantity <= 0) {
+        uni.showToast({ title: '请设置所有触发条件产品的数量', icon: 'none' })
+        return
+      }
+    }
+  } else {
+    for (const group of selectedConditionGroups.value) {
+      if (!group.quantity || group.quantity <= 0) {
+        uni.showToast({ title: '请设置所有触发条件组合的数量', icon: 'none' })
+        return
+      }
+    }
+  }
+  
+  // 检查是否选择了赠品
+  if (!useGiftGroupMode.value && form.value.gifts.length === 0) {
     uni.showToast({ title: '请至少选择一个赠品', icon: 'none' })
+    return
+  }
+  if (useGiftGroupMode.value && selectedGiftGroups.value.length === 0) {
+    uni.showToast({ title: '请至少选择一个赠品组合', icon: 'none' })
     return
   }
   
   // 验证每个赠品的数量
-  for (const gift of form.value.gifts) {
-    if (!gift.quantity || gift.quantity <= 0) {
-      uni.showToast({ title: '请设置所有赠品的数量', icon: 'none' })
-      return
+  if (!useGiftGroupMode.value) {
+    for (const gift of form.value.gifts) {
+      if (!gift.quantity || gift.quantity <= 0) {
+        uni.showToast({ title: '请设置所有赠品的数量', icon: 'none' })
+        return
+      }
+    }
+  } else {
+    for (const giftGroup of selectedGiftGroups.value) {
+      if (!giftGroup.quantity || giftGroup.quantity <= 0) {
+        uni.showToast({ title: '请设置所有赠品组合的数量', icon: 'none' })
+        return
+      }
     }
   }
   
   try {
-    // 构造gifts数组，包含产品ID、产品名称和数量
-    const gifts = form.value.gifts.map(gift => {
-      const product = products.value.find(p => p.id === gift.productId)
-      return {
-        productId: gift.productId,
-        productName: product?.name || '',
-        quantity: gift.quantity
+    // 构造gifts数组
+    let gifts: any[] = []
+    
+    if (useGiftGroupMode.value) {
+      // 组合模式：每个组合只创建一条赠品记录，数量为组合总数量
+      // 重要：quantity 表示组合内所有商品的总数量，而不是每个商品的数量
+      selectedGiftGroups.value.forEach(giftGroup => {
+        const group = giftProductGroups.value.find(g => g.id === giftGroup.groupId)
+        if (group) {
+          // 组合赠品：只创建一条记录，quantity 是组合的总数量，需要分配给组合中的所有产品
+          gifts.push({
+            type: group.name, // 使用组合名称作为类型
+            quantity: giftGroup.quantity, // 组合总数量（需要分配给组合中的所有产品）
+            productIds: group.productIds, // 组合中的所有产品ID
+            groupId: giftGroup.groupId, // 标记来自组合
+            // 兼容字段：保留第一个产品ID和名称（用于向后兼容）
+            productId: group.productIds[0] || '',
+            productName: group.productIds.length > 0 
+              ? products.value.find(p => p.id === group.productIds[0])?.name || group.name
+              : group.name
+          })
+        }
+      })
+    } else {
+      // 单个模式：直接使用选中的产品
+      gifts = form.value.gifts.map(gift => {
+        const product = products.value.find(p => p.id === gift.productId)
+        return {
+          productId: gift.productId,
+          productName: product?.name || '',
+          quantity: gift.quantity
+        }
+      })
+    }
+    
+    // 根据模式设置触发条件
+    // 计算最小阈值（取所有条件中的最小值）
+    let minThreshold = 100
+    let finalConditionProducts: string[] = []
+    let conditionGroupId: string | undefined = undefined
+    let conditionDetails: Array<{ type: 'product' | 'group'; productId?: string; groupId?: string; quantity: number }> = []
+    
+    if (useConditionGroupMode.value) {
+      // 组合模式：将选中的组合中的所有产品ID合并
+      selectedConditionGroups.value.forEach(selectedGroup => {
+        const group = conditionProductGroups.value.find(g => g.id === selectedGroup.groupId)
+        if (group) {
+          finalConditionProducts = [...finalConditionProducts, ...group.productIds]
+          minThreshold = Math.min(minThreshold, selectedGroup.quantity)
+          conditionDetails.push({
+            type: 'group',
+            groupId: selectedGroup.groupId,
+            quantity: selectedGroup.quantity
+          })
+        }
+      })
+      // 如果有多个组合，使用第一个组合的ID（向后兼容）
+      if (selectedConditionGroups.value.length > 0) {
+        conditionGroupId = selectedConditionGroups.value[0].groupId
       }
-    })
+    } else {
+      // 单个模式：直接使用选中的产品ID
+      selectedConditionProducts.value.forEach(product => {
+        finalConditionProducts.push(product.productId)
+        minThreshold = Math.min(minThreshold, product.quantity)
+        conditionDetails.push({
+          type: 'product',
+          productId: product.productId,
+          quantity: product.quantity
+        })
+      })
+    }
     
     await promotionApi.create({
       name: form.value.name,
       description: form.value.description,
-      threshold: form.value.threshold,
-      conditionProducts: form.value.conditionProducts,
+      threshold: minThreshold, // 使用最小阈值（向后兼容）
+      conditionProducts: finalConditionProducts,
+      conditionGroupId,
+      conditionDetails, // 新增：条件详情
       gifts,
       isActive: true,
       startDate: form.value.startDate,
@@ -414,13 +786,16 @@ const addPromotion = async () => {
     form.value = {
       name: '',
       description: '',
-      threshold: 100,
-      conditionProducts: [],
       gifts: [],
+      giftGroups: [],
       startDate: '',
       endDate: ''
     }
     selectedConditionProducts.value = []
+    selectedConditionGroups.value = []
+    selectedGiftGroups.value = []
+    useConditionGroupMode.value = false
+    useGiftGroupMode.value = false
   } catch (error) {
     uni.showToast({ title: '添加失败', icon: 'none' })
   }
@@ -461,6 +836,11 @@ const deletePromo = (id: string, e: any) => {
     }
   })
 }
+
+// 页面加载时获取产品组合列表
+onMounted(async () => {
+  await loadConditionProductGroups()
+})
 </script>
 
 <style lang="scss" scoped>
@@ -771,7 +1151,7 @@ const deletePromo = (id: string, e: any) => {
 }
 
 .quantity-input {
-  width: 90rpx;
+  width: 135rpx;
   height: 60rpx;
   text-align: center;
   font-size: 32rpx;
@@ -781,7 +1161,7 @@ const deletePromo = (id: string, e: any) => {
   border-radius: 6rpx;
   
   &--small {
-    width: 90rpx;
+    width: 135rpx;
     height: 60rpx;
     font-size: 32rpx;
   }
@@ -895,6 +1275,126 @@ const deletePromo = (id: string, e: any) => {
 .empty-text {
   font-size: 28rpx;
   color: $text-placeholder;
+}
+
+// 切换按钮样式
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20rpx;
+}
+
+.mode-switch {
+  display: flex;
+  background: $bg-grey;
+  border-radius: 8rpx;
+  padding: 4rpx;
+  gap: 4rpx;
+  
+  &__item {
+    padding: 8rpx 20rpx;
+    border-radius: 6rpx;
+    font-size: 24rpx;
+    color: $text-secondary;
+    transition: all 0.2s ease;
+    
+    &--active {
+      background: $primary-color;
+      color: #fff;
+    }
+  }
+}
+
+// 组合选择样式
+.product-group-select {
+  margin-top: 16rpx;
+}
+
+.group-select {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+
+.group-select-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx;
+  background: $bg-grey;
+  border-radius: $border-radius;
+  border: 2rpx solid transparent;
+  transition: all 0.2s ease;
+  
+  &--active {
+    background: rgba($primary-color, 0.08);
+    border-color: $primary-color;
+  }
+  
+  &__left {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 16rpx;
+  }
+  
+  &__check {
+    width: 40rpx;
+    height: 40rpx;
+    border: 2rpx solid $border-color;
+    border-radius: 8rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    font-size: 24rpx;
+    color: $primary-color;
+    font-weight: 600;
+    flex-shrink: 0;
+    
+    .group-select-item--active & {
+      background: $primary-color;
+      border-color: $primary-color;
+      color: #fff;
+    }
+  }
+  
+  &__info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4rpx;
+  }
+  
+  &__name {
+    font-size: 28rpx;
+    font-weight: 500;
+    color: $text-primary;
+  }
+  
+  &__products {
+    font-size: 24rpx;
+    color: $text-secondary;
+  }
+}
+
+.empty-groups {
+  padding: 40rpx 20rpx;
+  text-align: center;
+  
+  .empty-text {
+    font-size: 26rpx;
+    color: $text-placeholder;
+  }
+}
+
+.form-desc {
+  font-size: 24rpx;
+  color: $text-secondary;
+  margin-bottom: 16rpx;
+  line-height: 1.5;
 }
 </style>
 

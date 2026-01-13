@@ -59,11 +59,13 @@ const props = withDefaults(defineProps<{
   quickNumbers?: number[]
   calcLabel?: string
   calcResult?: string | number
+  allowDecimal?: boolean  // 是否允许小数，默认false（金额输入不允许小数）
 }>(), {
   type: 'text',
   clearable: true,
   showQuickNumbers: false,
-  quickNumbers: () => [10, 20, 50, 100]
+  quickNumbers: () => [10, 20, 50, 100],
+  allowDecimal: false
 })
 
 const emit = defineEmits<{
@@ -81,6 +83,22 @@ const handleInput = (e: any) => {
     inputValue = String(e.detail.value)
   } else if (e.target && (e.target as HTMLInputElement).value !== undefined) {
     inputValue = String((e.target as HTMLInputElement).value)
+  }
+  
+  // 对于数字类型，过滤掉符号（负号、加号等），只允许数字
+  if (props.type === 'number' || props.type === 'digit') {
+    if (props.allowDecimal) {
+      // 允许小数：移除所有符号（负号、加号、e、E等），只保留数字和小数点
+      inputValue = inputValue.replace(/[^0-9.]/g, '')
+      // 确保只有一个小数点
+      const parts = inputValue.split('.')
+      if (parts.length > 2) {
+        inputValue = parts[0] + '.' + parts.slice(1).join('')
+      }
+    } else {
+      // 不允许小数：只允许数字，不允许任何符号（包括负号、加号、小数点等）
+      inputValue = inputValue.replace(/[^0-9]/g, '')
+    }
   }
   
   const value = props.type === 'number' || props.type === 'digit' 

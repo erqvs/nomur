@@ -41,7 +41,22 @@
             <image :src="getIcon(tx.reason)" class="tx-icon" mode="aspectFit" />
           </view>
           <view class="transaction-card__info">
-            <text class="transaction-card__agent" @tap.stop="goToAgentDetail(tx.agentId)">{{ tx.agentName }}</text>
+            <!-- 如果有代理商名称，显示代理商；如果是收款账户扣费（有paymentAccountId但没有agentName），显示收款账户名称 -->
+            <text 
+              v-if="tx.agentName" 
+              class="transaction-card__agent" 
+              @tap.stop="goToAgentDetail(tx.agentId)"
+            >
+              {{ tx.agentName }}
+            </text>
+            <text 
+              v-else-if="tx.paymentAccountId && tx.paymentAccountName" 
+              class="transaction-card__agent"
+              @tap.stop="goToPayeeDetail(tx.paymentAccountId, tx.paymentAccountName)"
+            >
+              {{ tx.paymentAccountName }}
+            </text>
+            <text v-else class="transaction-card__agent">系统</text>
             <text class="transaction-card__reason">{{ getLabel(tx.reason) }}</text>
             <text v-if="tx.type === 'recharge' && tx.reason === 'payment' && tx.paymentAccountName" 
                   class="transaction-card__payee" 
@@ -64,11 +79,21 @@
             >
               {{ tx.amount > 0 ? '+' : '' }}¥{{ Math.abs(tx.amount).toLocaleString() }}
             </text>
-            <!-- 凭证缩略图 -->
-            <view v-if="tx.proof" class="transaction-card__proof-thumbnail" @tap.stop="previewProof(tx.proof)">
-              <image :src="tx.proof" class="proof-thumbnail-img" mode="aspectFill" />
-              <view class="proof-thumbnail-badge">
-                <image src="/static/icons/eye.svg" class="proof-badge-icon" mode="aspectFit" />
+            <!-- 凭证缩略图（支持多张） -->
+            <view v-if="getProofImages(tx.proof).length > 0" class="transaction-card__proof-thumbnails">
+              <view 
+                v-for="(proofUrl, index) in getProofImages(tx.proof).slice(0, 3)" 
+                :key="index"
+                class="transaction-card__proof-thumbnail"
+                @tap.stop="previewProof(getProofImages(tx.proof), index)"
+              >
+                <image :src="proofUrl" class="proof-thumbnail-img" mode="aspectFill" />
+                <view class="proof-thumbnail-badge">
+                  <image src="/static/icons/eye.svg" class="proof-badge-icon" mode="aspectFit" />
+                </view>
+              </view>
+              <view v-if="getProofImages(tx.proof).length > 3" class="proof-more-badge">
+                <text>+{{ getProofImages(tx.proof).length - 3 }}</text>
               </view>
             </view>
           </view>
@@ -186,12 +211,13 @@
             prefix="¥"
             :showQuickNumbers="true"
             :quickNumbers="[1000, 5000, 10000, 50000]"
+            :allowDecimal="false"
           />
           
           <ImageUploader
             v-model="rechargeForm.proof"
             label="上传凭证"
-            :maxCount="1"
+            tip="每次上传一张，可重复上传"
             addText="上传凭证"
           />
         </view>
@@ -431,15 +457,24 @@
       </view>
     </view>
     
+    <!-- 图片预览 -->
+    <ImagePreview 
+      :show="showImagePreview"
+      :urls="previewImageUrls"
+      :current="previewImageIndex"
+      @close="showImagePreview = false"
+    />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useAppStore } from '@/stores/app'
 import TagSelect from '@/components/TagSelect/index.vue'
 import QuickInput from '@/components/QuickInput/index.vue'
 import ImageUploader from '@/components/ImageUploader/index.vue'
+import ImagePreview from '@/components/ImagePreview/index.vue'
 import { paymentAccountApi } from '@/api'
 import { uploadImage } from '@/utils/upload'
 import type { Transaction, TransactionReason } from '@/types'
@@ -593,6 +628,14 @@ const loadPaymentAccounts = async () => {
 
 onMounted(() => {
   loadPaymentAccounts()
+})
+
+onShow(async () => {
+  // 刷新交易记录和代理商数据（因为编辑交易记录后余额可能变化）
+  await Promise.all([
+    store.loadTransactions(),
+    store.loadAgents()
+  ])
 })
 
 // 选择充值原因
@@ -763,9 +806,12 @@ const getIcon = (reason: TransactionReason) => {
     fine: '/static/icons/warning.svg',
     transfer_in: '/static/icons/arrow-down-circle.svg',
     transfer_out: '/static/icons/arrow-up-circle.svg',
-    marketing: '/static/icons/target.svg'
+    marketing: '/static/icons/target.svg',
+    withdraw: '/static/icons/file-text.svg',
+    fee: '/static/icons/file-text.svg',
+    other: '/static/icons/file-text.svg'
   }
-  return icons[reason]
+  return icons[reason] || '/static/icons/file-text.svg'
 }
 
 // 获取标签
@@ -778,46 +824,50 @@ const getLabel = (reason: TransactionReason) => {
     fine: '罚款',
     transfer_in: '调货收入',
     transfer_out: '调货支出',
-    marketing: '营销退款'
+    marketing: '营销退款',
+    withdraw: '提现',
+    fee: '手续费',
+    other: '其他'
   }
-  return labels[reason]
+  return labels[reason] || reason
 }
 
 // 格式化时间
 const formatTime = (time: string | Date) => {
   const d = new Date(time)
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const recordDate = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  const diffDays = Math.floor((today.getTime() - recordDate.getTime()) / (1000 * 60 * 60 * 24))
-  
+  const year = d.getFullYear()
   const month = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   const hour = String(d.getHours()).padStart(2, '0')
   const min = String(d.getMinutes()).padStart(2, '0')
-  
-  if (diffDays === 0) {
-    // 今天：只显示时间
-    return `${hour}:${min}`
-  } else if (diffDays === 1) {
-    // 昨天
-    return `昨天 ${hour}:${min}`
-  } else if (diffDays < 7) {
-    // 一周内：显示月-日 时:分
-    return `${month}-${day} ${hour}:${min}`
-  } else if (d.getFullYear() === now.getFullYear()) {
-    // 今年：显示月-日 时:分
-    return `${month}-${day} ${hour}:${min}`
-  } else {
-    // 去年或更早：显示年-月-日 时:分
-    const year = d.getFullYear()
-    return `${year}-${month}-${day} ${hour}:${min}`
+  return `${year}-${month}-${day} ${hour}:${min}`
+}
+
+// 图片预览状态
+const showImagePreview = ref(false)
+const previewImageUrls = ref<string[]>([])
+const previewImageIndex = ref(0)
+
+// 预览凭证
+// 解析凭证图片（支持字符串或数组）
+const getProofImages = (proof: string | string[] | undefined): string[] => {
+  if (!proof) return []
+  if (Array.isArray(proof)) return proof
+  // 尝试解析 JSON 字符串
+  try {
+    const parsed = JSON.parse(proof)
+    if (Array.isArray(parsed)) return parsed
+    return [proof] // 如果不是数组，返回原字符串作为单元素数组
+  } catch {
+    return [proof] // 解析失败，返回原字符串作为单元素数组
   }
 }
 
-// 预览凭证
-const previewProof = (url: string) => {
-  uni.previewImage({ urls: [url] })
+const previewProof = (urls: string | string[], index: number = 0) => {
+  const images = Array.isArray(urls) ? urls : [urls]
+  previewImageUrls.value = images
+  previewImageIndex.value = index
+  showImagePreview.value = true
 }
 
 // 客户打款记录弹窗
@@ -858,11 +908,10 @@ const selectedPayeeId = ref<string>('')
 const selectedPayeeName = ref<string>('')
 const payeePayments = ref<Transaction[]>([])
 
-// 跳转到收款人详情页（跳转到收款人页面）
-const goToPayeeDetail = async (payeeId: string, payeeName: string) => {
-  // 跳转到收款人页面，由收款人页面处理详情展示
-  uni.switchTab({
-    url: '/pages/admin/payees/index'
+// 跳转到收款人详情页
+const goToPayeeDetail = (payeeId: string, payeeName: string) => {
+  uni.navigateTo({
+    url: `/pages/admin/payees/detail?id=${payeeId}&name=${encodeURIComponent(payeeName)}`
   })
 }
 
@@ -900,11 +949,16 @@ const confirmRecharge = async () => {
     
     // 如果有金额，先进行充值
     if (rechargeForm.value.amount > 0) {
+      // 凭证图片（多张，已通过 ImageUploader 上传到服务器）
+      const proofValue = rechargeForm.value.proof.length > 0 
+        ? (rechargeForm.value.proof.length === 1 ? rechargeForm.value.proof[0] : JSON.stringify(rechargeForm.value.proof))
+        : undefined
+      
       await store.recharge(
         rechargeForm.value.agentId,
         rechargeForm.value.amount,
         finalReason,
-        rechargeForm.value.proof[0],
+        proofValue,
         rechargeForm.value.remark || undefined,
         rechargeForm.value.paymentAccountId || undefined
       )
@@ -1246,6 +1300,13 @@ const confirmTransfer = async () => {
     font-size: 36rpx;
     font-weight: 700;
     text-align: right;
+  }
+  
+  &__proof-thumbnails {
+    display: flex;
+    align-items: center;
+    gap: 8rpx;
+    flex-wrap: wrap;
   }
   
   &__proof-thumbnail {
@@ -1786,7 +1847,7 @@ const confirmTransfer = async () => {
 }
 
 .quantity-input {
-  width: 90rpx;
+  width: 135rpx;
   height: 60rpx;
   text-align: center;
   font-size: 32rpx;
@@ -1796,7 +1857,7 @@ const confirmTransfer = async () => {
   border-radius: 6rpx;
   
   &--small {
-    width: 90rpx;
+    width: 135rpx;
     height: 60rpx;
     font-size: 32rpx;
   }

@@ -38,7 +38,10 @@
           v-for="product in products" 
           :key="product.id"
           class="product-select-item"
-          :class="{ 'product-select-item--active': isProductSelected(product.id) }"
+          :class="{ 
+            'product-select-item--active': isProductSelected(product.id),
+            'product-select-item--disabled': isProductDisabled(product.id)
+          }"
         >
           <view class="product-select-item__left" @tap="toggleProduct(product.id)">
             <view class="product-select-item__check">
@@ -46,14 +49,15 @@
             </view>
             <text class="product-select-item__name">{{ product.name }}</text>
           </view>
-          <view v-if="isProductSelected(product.id)" class="product-select-item__quantity" @tap.stop>
+          <view v-if="isProductSelected(product.id)" class="product-select-item__quantity" @tap.prevent.stop>
             <view class="quantity-control">
               <view class="quantity-btn quantity-btn--small" @tap="changeQuantity(product.id, -1)">-</view>
               <input 
                 type="number" 
                 :value="getItemQuantity(product.id)" 
                 class="quantity-input quantity-input--small"
-                @input="(e: any) => setQuantity(product.id, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                @input="handleQuantityInput(product.id, $event)"
+                @blur="handleQuantityBlur(product.id, $event)"
               />
               <view class="quantity-btn quantity-btn--small" @tap="changeQuantity(product.id, 1)">+</view>
             </view>
@@ -63,35 +67,39 @@
       
       <!-- 产品组合选择模式 -->
       <view v-else class="product-group-select">
-        <text class="form-desc">选择产品类型，系统将从该类型下的产品中自动分配</text>
-        <view class="gift-type-select">
+        <text class="form-desc">选择产品组合，设置组合数量（组合数量 = 组合中所有商品数量之和）</text>
+        <view v-if="productGroups.length === 0" class="empty-groups">
+          <text class="empty-text">暂无产品组合，请先在"组合管理"页面创建组合</text>
+        </view>
+        <view v-else class="group-select">
           <view 
-            v-for="category in categorizedProducts"
-            :key="category.type"
-            class="gift-type-item"
-            :class="{ 'gift-type-item--active': isProductTypeSelected(category.type) }"
+            v-for="group in productGroups"
+            :key="group.id"
+            class="group-select-item"
+            :class="{ 'group-select-item--active': isGroupSelected(group.id) }"
           >
-            <view class="gift-type-item__left" @tap="toggleProductTypeSelection(category.type)">
-              <view class="gift-type-item__check">
-                <text v-if="isProductTypeSelected(category.type)">✓</text>
+            <view class="group-select-item__left" @tap="toggleGroupSelection(group.id)">
+              <view class="group-select-item__check">
+                <text v-if="isGroupSelected(group.id)">✓</text>
               </view>
-              <view class="gift-type-item__info">
-                <text class="gift-type-item__name">{{ category.type }}</text>
-                <text class="gift-type-item__products">{{ category.products.map(p => p.name).join('、') }}</text>
+              <view class="group-select-item__info">
+                <text class="group-select-item__name">{{ group.name }}</text>
+                <text class="group-select-item__products">
+                  {{ getGroupProductNames(group.id).join('、') }}
+                </text>
               </view>
             </view>
-            <view v-if="isProductTypeSelected(category.type)" class="gift-type-item__quantity" @tap.stop>
+            <view v-if="isGroupSelected(group.id)" class="group-select-item__quantity" @tap.prevent.stop>
               <view class="quantity-control">
-                <view class="quantity-btn quantity-btn--small" @tap="changeProductTypeQuantity(category.type, -10)">-10</view>
-                <view class="quantity-btn quantity-btn--small" @tap="changeProductTypeQuantity(category.type, -1)">-</view>
+                <view class="quantity-btn quantity-btn--small" @tap="changeGroupQuantity(group.id, -1)">-</view>
                 <input 
                   type="number" 
-                  :value="getProductTypeQuantity(category.type)" 
+                  :value="getGroupQuantity(group.id)" 
                   class="quantity-input quantity-input--small"
-                  @input="(e: any) => setProductTypeQuantity(category.type, Number(e.detail?.value ?? (e.target as HTMLInputElement)?.value ?? 0))"
+                  @input="handleGroupQuantityInput(group.id, $event)"
+                  @blur="handleGroupQuantityBlur(group.id, $event)"
                 />
-                <view class="quantity-btn quantity-btn--small" @tap="changeProductTypeQuantity(category.type, 1)">+</view>
-                <view class="quantity-btn quantity-btn--small" @tap="changeProductTypeQuantity(category.type, 10)">+10</view>
+                <view class="quantity-btn quantity-btn--small" @tap="changeGroupQuantity(group.id, 1)">+</view>
               </view>
             </view>
           </view>
@@ -108,6 +116,7 @@
         </view>
       </view>
       
+      <!-- 整车计算显示 -->
       <view v-if="currentTruckType" class="truck-calc">
         <view class="truck-progress">
           <view class="truck-progress__bar">
@@ -140,7 +149,7 @@
           还差 <text class="highlight">{{ (currentTruckType.minWeight - totalWeight).toLocaleString() }}kg</text> 达到整车
         </view>
         <view v-else-if="truckStatus === 'overload'" class="truck-tip truck-tip--warning">
-          超载 <text class="highlight">{{ (totalWeight - currentTruckType.maxWeight).toLocaleString() }}kg</text>，请减少商品
+          超载 <text class="highlight">{{ (totalWeight - currentTruckType.maxWeight).toLocaleString() }}kg</text>（仅提醒，可继续开单）
         </view>
       </view>
     </view>
@@ -172,7 +181,7 @@
       <ImageUploader
         v-model="form.images"
         label="订单图片（可选）"
-        tip="可上传订单相关图片"
+        tip="每次上传一张，可重复上传"
       />
     </view>
     
@@ -267,20 +276,13 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAppStore } from '@/stores/app'
+import { productGroupApi, truckApi, type TruckType } from '@/api'
 import TagSelect from '@/components/TagSelect/index.vue'
 import QuickInput from '@/components/QuickInput/index.vue'
 import ImageUploader from '@/components/ImageUploader/index.vue'
-import type { OrderItem } from '@/types'
+import type { OrderItem, ProductGroup } from '@/types'
 
 const store = useAppStore()
-
-interface TruckType {
-  id: string
-  name: string
-  minWeight: number
-  maxWeight: number
-  isDefault: boolean
-}
 
 const truckTypes = ref<TruckType[]>([])
 const showTruckSelect = ref(false)
@@ -291,13 +293,15 @@ const productQuantityCache = ref<Record<string, number>>({})
 // 产品组合选择模式
 const useProductGroupMode = ref(false)
 
-// 产品类型组合（用于组合选择模式）
-interface ProductTypeGroup {
-  type: string
+// 产品组合列表
+const productGroups = ref<ProductGroup[]>([])
+
+// 选中的组合及其数量
+interface SelectedGroup {
+  groupId: string
   quantity: number
-  productIds: string[]
 }
-const productTypeGroups = ref<ProductTypeGroup[]>([])
+const selectedGroups = ref<SelectedGroup[]>([])
 
 const form = ref({
   agentId: null as string | null,
@@ -311,32 +315,39 @@ const form = ref({
 // 加载车型
 const loadTrucks = async () => {
   try {
-    const res = await uni.request({
-      url: 'https://nomur.linkmate.site/api/truck-types',
-      method: 'GET'
-    })
-    const data = res.data as any
-    if (data.code === 0) {
-      truckTypes.value = data.data
-      // 默认选择默认车型
-      const defaultTruck = truckTypes.value.find(t => t.isDefault)
-      if (defaultTruck) {
-        form.value.truckTypeId = defaultTruck.id
-      }
+    const data = await truckApi.getAll()
+    truckTypes.value = data
+    // 默认选择默认车型
+    const defaultTruck = truckTypes.value.find(t => t.isDefault)
+    if (defaultTruck) {
+      form.value.truckTypeId = defaultTruck.id
     }
   } catch (e) {
     console.error('加载车型失败', e)
+    uni.showToast({ title: '加载车型失败', icon: 'none' })
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadTrucks()
+  await loadProductGroups()
 })
 
-// 页面显示时刷新车型列表（从车型管理页面返回时）
-onShow(() => {
+// 页面显示时刷新车型列表和组合列表
+onShow(async () => {
   loadTrucks()
+  await loadProductGroups()
 })
+
+// 加载产品组合列表
+const loadProductGroups = async () => {
+  try {
+    productGroups.value = await productGroupApi.getAll()
+  } catch (error) {
+    console.error('加载产品组合失败:', error)
+    uni.showToast({ title: '加载组合失败', icon: 'none' })
+  }
+}
 
 // 当前选中的车型
 const currentTruckType = computed(() => 
@@ -406,131 +417,126 @@ const agentOptions = computed(() =>
 
 const products = computed(() => store.products)
 
-// 产品分类（用于组合选择）
-const categorizedProducts = computed(() => {
-  const categories: { [key: string]: { type: string; products: any[] } } = {}
-  store.products.forEach(p => {
-    let type = '其他'
-    if (p.name.includes('芒果')) {
-      type = '芒果类'
-    } else if (p.name.includes('茶')) {
-      type = '茶类'
-    } else if (p.name.includes('龙眼') || p.name.includes('水果')) {
-      type = '水果类'
-    }
-
-    if (!categories[type]) {
-      categories[type] = { type, products: [] }
-    }
-    categories[type].products.push(p)
-  })
-  return Object.values(categories)
-})
-
-// 产品类型选择相关方法
-const isProductTypeSelected = (type: string) => {
-  return productTypeGroups.value.some(g => g.type === type)
+// 产品组合选择相关方法
+const isGroupSelected = (groupId: string) => {
+  return selectedGroups.value.some(g => g.groupId === groupId)
 }
 
-const toggleProductTypeSelection = (type: string) => {
+const toggleGroupSelection = (groupId: string) => {
   uni.vibrateShort({ type: 'light' })
-  const index = productTypeGroups.value.findIndex(g => g.type === type)
+  const index = selectedGroups.value.findIndex(g => g.groupId === groupId)
   if (index > -1) {
-    productTypeGroups.value.splice(index, 1)
-    // 清除该类型对应的items
-    updateItemsFromProductGroups()
+    // 取消选择组合
+    selectedGroups.value.splice(index, 1)
+    updateItemsFromGroups()
   } else {
-    const category = categorizedProducts.value.find(c => c.type === type)
-    if (category) {
-      productTypeGroups.value.push({
-        type,
-        quantity: 10, // 默认10箱
-        productIds: category.products.map(p => p.id)
+    // 选择组合前，先检查该组合中的产品是否已被单独选择
+    const group = productGroups.value.find(g => g.id === groupId)
+    if (group && group.productIds.length > 0) {
+      // 找出该组合中已被单独选择的产品
+      const productsToRemove: string[] = []
+      group.productIds.forEach(productId => {
+        if (isProductSelected(productId)) {
+          productsToRemove.push(productId)
+        }
       })
-      updateItemsFromProductGroups()
+      
+      // 如果组合中的某些产品已被单独选择，先取消这些产品的选择
+      if (productsToRemove.length > 0) {
+        productsToRemove.forEach(productId => {
+          const item = form.value.items.find(i => i.productId === productId)
+          if (item) {
+            // 保存数量到暂存
+            productQuantityCache.value[productId] = item.quantity
+          }
+        })
+        // 从items中移除这些产品
+        form.value.items = form.value.items.filter(item => !productsToRemove.includes(item.productId))
+      }
     }
+    
+    // 选择组合
+    selectedGroups.value.push({
+      groupId,
+      quantity: 10 // 默认10箱
+    })
+    updateItemsFromGroups()
   }
 }
 
-const getProductTypeQuantity = (type: string) => {
-  const group = productTypeGroups.value.find(g => g.type === type)
+const getGroupQuantity = (groupId: string) => {
+  const group = selectedGroups.value.find(g => g.groupId === groupId)
   return group?.quantity || 0
 }
 
-const setProductTypeQuantity = (type: string, quantity: number) => {
-  const group = productTypeGroups.value.find(g => g.type === type)
+const setGroupQuantity = (groupId: string, quantity: number) => {
+  const group = selectedGroups.value.find(g => g.groupId === groupId)
   if (group) {
-    group.quantity = Math.max(1, quantity || 1)
-    updateItemsFromProductGroups()
+    const validQuantity = Math.max(1, quantity || 1)
+    group.quantity = validQuantity
+    updateItemsFromGroups()
   }
 }
 
-const changeProductTypeQuantity = (type: string, delta: number) => {
-  const group = productTypeGroups.value.find(g => g.type === type)
+const changeGroupQuantity = (groupId: string, delta: number) => {
+  const group = selectedGroups.value.find(g => g.groupId === groupId)
   if (group) {
-    const step = Math.abs(delta) === 10 ? 10 : 1
-    group.quantity = Math.max(1, group.quantity + (delta > 0 ? step : -step))
-    updateItemsFromProductGroups()
+    const newQuantity = Math.max(1, group.quantity + delta)
+    group.quantity = newQuantity
+    updateItemsFromGroups()
   }
 }
 
-// 根据产品类型组合更新items
-const updateItemsFromProductGroups = () => {
-  // 清空现有items
-  form.value.items = []
+// 处理组合数量输入事件
+const handleGroupQuantityInput = (groupId: string, e: any) => {
+  // uni-app 中 input 事件使用 e.detail.value
+  let inputValue = ''
+  if (e.detail && e.detail.value !== undefined) {
+    inputValue = String(e.detail.value)
+  } else if (e.target && (e.target as HTMLInputElement).value !== undefined) {
+    inputValue = String((e.target as HTMLInputElement).value)
+  }
   
-  // 根据类型组合生成items（随机分配）
-  productTypeGroups.value.forEach(group => {
-    if (group.productIds.length === 0) return
-    
-    const availableProducts = store.products.filter(p => group.productIds.includes(p.id))
-    if (availableProducts.length === 0) return
-    
-    // 随机分配到类型下的产品
-    let remainingQuantity = group.quantity
-    const distribution: Record<string, number> = {}
-    
-    while (remainingQuantity > 0) {
-      const randomProduct = availableProducts[Math.floor(Math.random() * availableProducts.length)]
-      const qtyToAdd = Math.min(remainingQuantity, Math.floor(Math.random() * remainingQuantity) + 1)
-      
-      distribution[randomProduct.id] = (distribution[randomProduct.id] || 0) + qtyToAdd
-      remainingQuantity -= qtyToAdd
-    }
-    
-    // 添加到items
-    Object.entries(distribution).forEach(([productId, quantity]) => {
-      const product = store.products.find(p => p.id === productId)
-      if (product) {
-        const existingItem = form.value.items.find(item => item.productId === productId)
-        if (existingItem) {
-          existingItem.quantity += quantity
-        } else {
-          form.value.items.push({
-            productId: product.id,
-            productName: product.name,
-            quantity,
-            price: product.price,
-            weight: product.weight
-          })
-        }
-      }
-    })
+  // 只允许数字，移除所有非数字字符
+  inputValue = inputValue.replace(/[^0-9]/g, '')
+  
+  const value = inputValue === '' ? 1 : Math.max(1, Number(inputValue) || 1)
+  setGroupQuantity(groupId, value)
+}
+
+// 处理组合数量失焦事件（确保最终值有效）
+const handleGroupQuantityBlur = (groupId: string, e: any) => {
+  const group = selectedGroups.value.find(g => g.groupId === groupId)
+  if (group && group.quantity < 1) {
+    group.quantity = 1
+    updateItemsFromGroups()
+  }
+}
+
+// 获取组合中的商品名称
+const getGroupProductNames = (groupId: string) => {
+  const group = productGroups.value.find(g => g.id === groupId)
+  if (!group) return []
+  return group.productIds.map(productId => {
+    const product = store.products.find(p => p.id === productId)
+    return product?.name || productId
   })
 }
 
-// 监听组合模式切换
-const watchUseProductGroupMode = () => {
-  if (useProductGroupMode.value) {
-    // 切换到组合模式时，清空items
-    form.value.items = []
-  } else {
-    // 切换到单个模式时，清空类型组合
-    productTypeGroups.value = []
-  }
+// 根据选中的组合更新items
+// 注意：组合和单个商品是分开的，不应该互相影响
+// form.value.items 只存储单个商品选择，组合单独存储在 selectedGroups 中
+const updateItemsFromGroups = () => {
+  // 组合选择不影响 form.value.items
+  // 组合的商品只在提交订单时合并
 }
 
-// 使用watch监听useProductGroupMode变化
+// 监听组合模式切换
+// 注意：切换模式时不清空已选择的内容，允许两种模式的选择叠加
+const watchUseProductGroupMode = () => {
+  // 切换模式时不清空选择，允许叠加
+  // 这样用户可以在"单个"模式选择商品，然后切换到"组合"模式选择组合，两者都会保留
+}
 watch(useProductGroupMode, watchUseProductGroupMode)
 
 const promotionOptions = computed(() => 
@@ -544,11 +550,36 @@ const promotionOptions = computed(() =>
 // 已选商品
 const selectedProducts = computed(() => form.value.items)
 
+// 检查产品是否属于已选择的组合
+const isProductInSelectedGroups = (productId: string) => {
+  return selectedGroups.value.some(selectedGroup => {
+    const group = productGroups.value.find(g => g.id === selectedGroup.groupId)
+    return group && group.productIds.includes(productId)
+  })
+}
+
+// 检查单个商品是否被选中（不包含组合中的商品）
 const isProductSelected = (productId: string) => {
+  // 只检查单个商品选择，不检查组合
   return form.value.items.some(item => item.productId === productId)
 }
 
+// 检查产品是否被禁用（如果属于已选择的组合）
+const isProductDisabled = (productId: string) => {
+  return isProductInSelectedGroups(productId)
+}
+
 const toggleProduct = (productId: string) => {
+  // 如果产品属于已选择的组合，阻止选择
+  if (isProductInSelectedGroups(productId)) {
+    uni.showToast({ 
+      title: '该商品已包含在已选择的组合中，请先取消组合选择', 
+      icon: 'none',
+      duration: 2000
+    })
+    return
+  }
+  
   uni.vibrateShort({ type: 'light' })
   
   if (isProductSelected(productId)) {
@@ -579,18 +610,46 @@ const changeQuantity = (productId: string, delta: number) => {
   if (item) {
     // 增加时步长为 10，减少时步长为 1
     const step = delta > 0 ? 10 : 1
-    item.quantity = Math.max(1, item.quantity + (delta * step))
+    const newQuantity = Math.max(1, item.quantity + (delta * step))
+    item.quantity = newQuantity
     // 更新暂存数量
-    productQuantityCache.value[productId] = item.quantity
+    productQuantityCache.value[productId] = newQuantity
+  }
+}
+
+// 处理数量输入事件
+const handleQuantityInput = (productId: string, e: any) => {
+  // uni-app 中 input 事件使用 e.detail.value
+  let inputValue = ''
+  if (e.detail && e.detail.value !== undefined) {
+    inputValue = String(e.detail.value)
+  } else if (e.target && (e.target as HTMLInputElement).value !== undefined) {
+    inputValue = String((e.target as HTMLInputElement).value)
+  }
+  
+  // 只允许数字，移除所有非数字字符
+  inputValue = inputValue.replace(/[^0-9]/g, '')
+  
+  const value = inputValue === '' ? 1 : Math.max(1, Number(inputValue) || 1)
+  setQuantity(productId, value)
+}
+
+// 处理数量失焦事件（确保最终值有效）
+const handleQuantityBlur = (productId: string, e: any) => {
+  const item = form.value.items.find(i => i.productId === productId)
+  if (item && item.quantity < 1) {
+    item.quantity = 1
+    productQuantityCache.value[productId] = 1
   }
 }
 
 const setQuantity = (productId: string, value: number) => {
   const item = form.value.items.find(i => i.productId === productId)
   if (item) {
-    item.quantity = Math.max(1, value || 1)
+    const validValue = Math.max(1, value || 1)
+    item.quantity = validValue
     // 更新暂存数量
-    productQuantityCache.value[productId] = item.quantity
+    productQuantityCache.value[productId] = validValue
   }
 }
 
@@ -599,28 +658,145 @@ const getItemQuantity = (productId: string) => {
   return item?.quantity || 0
 }
 
+// 实时计算最终商品列表（包含单个商品和组合商品）
+const finalItemsComputed = computed(() => {
+  const items: OrderItem[] = [...form.value.items]
+  
+  // 将组合商品添加到 items 中
+  selectedGroups.value.forEach(selectedGroup => {
+    const group = productGroups.value.find(g => g.id === selectedGroup.groupId)
+    if (!group || group.productIds.length === 0) return
+    
+    const groupProducts = store.products.filter(p => group.productIds.includes(p.id))
+    if (groupProducts.length === 0) return
+    
+    // 平均分配组合数量到每个商品
+    const totalQuantity = selectedGroup.quantity
+    const productCount = groupProducts.length
+    const baseQuantity = Math.floor(totalQuantity / productCount)
+    const remainder = totalQuantity % productCount
+    
+    groupProducts.forEach((product, index) => {
+      const quantity = baseQuantity + (index < remainder ? 1 : 0)
+      
+      if (quantity > 0) {
+        const existingItem = items.find(item => item.productId === product.id)
+        if (existingItem) {
+          existingItem.quantity += quantity
+        } else {
+          items.push({
+            productId: product.id,
+            productName: product.name,
+            quantity,
+            price: product.price,
+            weight: product.weight
+          })
+        }
+      }
+    })
+  })
+  
+  return items
+})
+
 // 实时计算
 const totalQuantity = computed(() => 
-  form.value.items.reduce((sum, item) => sum + item.quantity, 0)
+  finalItemsComputed.value.reduce((sum, item) => sum + item.quantity, 0)
 )
 
-const totalWeight = computed(() =>
-  form.value.items.reduce((sum, item) => sum + item.quantity * item.weight, 0)
-)
+// 总重量计算：包含单个商品和组合商品
+// 组合重量 = 组合中单个产品的重量 * 组合数量（因为组合中所有产品重量相同）
+const totalWeight = computed(() => {
+  // 计算单个商品的重量
+  let weight = form.value.items.reduce((sum, item) => sum + item.quantity * item.weight, 0)
+  
+  // 加上组合的重量
+  selectedGroups.value.forEach(selectedGroup => {
+    const group = productGroups.value.find(g => g.id === selectedGroup.groupId)
+    if (!group || group.productIds.length === 0) return
+    
+    const groupProducts = store.products.filter(p => group.productIds.includes(p.id))
+    if (groupProducts.length === 0) return
+    
+    // 组合中所有产品重量相同，取第一个产品的重量
+    const productWeight = groupProducts[0].weight
+    // 组合重量 = 单个产品重量 * 组合数量
+    weight += productWeight * selectedGroup.quantity
+  })
+  
+  return weight
+})
 
-const totalAmount = computed(() =>
-  form.value.items.reduce((sum, item) => sum + item.quantity * item.price, 0)
-)
+// 总金额计算：包含单个商品和组合商品
+const totalAmount = computed(() => {
+  let amount = form.value.items.reduce((sum, item) => sum + item.quantity * item.price, 0)
+  
+  // 加上组合商品的金额
+  selectedGroups.value.forEach(selectedGroup => {
+    const group = productGroups.value.find(g => g.id === selectedGroup.groupId)
+    if (!group || group.productIds.length === 0) return
+    
+    const groupProducts = store.products.filter(p => group.productIds.includes(p.id))
+    if (groupProducts.length === 0) return
+    
+    // 平均分配组合数量到每个商品
+    const totalQuantity = selectedGroup.quantity
+    const productCount = groupProducts.length
+    const baseQuantity = Math.floor(totalQuantity / productCount)
+    const remainder = totalQuantity % productCount
+    
+    groupProducts.forEach((product, index) => {
+      const quantity = baseQuantity + (index < remainder ? 1 : 0)
+      amount += quantity * product.price
+    })
+  })
+  
+  return amount
+})
 
 // 计算促销活动的触发数量（支持条件产品组合）
 const getPromotionQuantity = (promotion: any) => {
+  const items = finalItemsComputed.value
+  
+  // 优先使用 conditionDetails（新格式）
+  if (promotion.conditionDetails && promotion.conditionDetails.length > 0) {
+    // 计算所有条件的总数量（直接返回订单中满足条件的实际数量，不乘以倍数）
+    let totalConditionQuantity = 0
+    
+    promotion.conditionDetails.forEach((condition: any) => {
+      if (condition.type === 'product') {
+        // 单个产品：查找订单中该产品的数量
+        const orderItem = items.find((item: any) => item.productId === condition.productId)
+        if (orderItem) {
+          // 直接累加订单中该产品的实际数量
+          totalConditionQuantity += orderItem.quantity
+        }
+      } else if (condition.type === 'group') {
+        // 组合：查找订单中该组合的所有产品
+        const group = productGroups.value.find(g => g.id === condition.groupId)
+        if (group) {
+          // 计算组合中所有产品的总数量
+          const groupTotalQuantity = group.productIds.reduce((sum: number, productId: string) => {
+            const orderItem = items.find((item: any) => item.productId === productId)
+            return sum + (orderItem?.quantity || 0)
+          }, 0)
+          // 直接累加组合的总数量
+          totalConditionQuantity += groupTotalQuantity
+        }
+      }
+    })
+    
+    return totalConditionQuantity
+  }
+  
+  // 旧格式：向后兼容
   // 如果没有指定条件产品，使用所有产品的总数量
   if (!promotion.conditionProducts || promotion.conditionProducts.length === 0) {
     return totalQuantity.value
   }
   
   // 计算条件产品组合的总数量
-  return form.value.items
+  return items
     .filter(item => promotion.conditionProducts.includes(item.productId))
     .reduce((sum, item) => sum + item.quantity, 0)
 }
@@ -634,24 +810,39 @@ const giftPromotions = computed(() => {
     const promotion = store.promotions.find(p => p.id === promotionId)
     if (promotion) {
       const conditionQuantity = getPromotionQuantity(promotion)
-      const times = Math.floor(conditionQuantity / promotion.threshold)
+      // 计算最小阈值（用于显示）
+      const minThreshold = promotion.conditionDetails && promotion.conditionDetails.length > 0
+        ? Math.min(...promotion.conditionDetails.map((c: any) => c.quantity))
+        : promotion.threshold
+      const times = Math.floor(conditionQuantity / minThreshold)
       if (times > 0) {
+        // 合并相同类型的赠品
+        const giftMap = new Map<string, number>()
+        
+        promotion.gifts.forEach(g => {
+          let key: string
+          // 新格式：按类型合并
+          if (g.type) {
+            key = `${g.type}（随机分配）`
+          } else {
+            // 旧格式：按产品名称合并
+            key = g.productName || g.productId || ''
+          }
+          
+          const quantity = g.quantity * times
+          const existingQuantity = giftMap.get(key) || 0
+          giftMap.set(key, existingQuantity + quantity)
+        })
+        
+        // 转换为数组
+        const mergedGifts = Array.from(giftMap.entries()).map(([productName, quantity]) => ({
+          productName,
+          quantity
+        }))
+        
         promotions.push({
           name: promotion.name,
-          gifts: promotion.gifts.map(g => {
-            // 新格式：显示类型
-            if (g.type) {
-              return {
-                productName: `${g.type}（随机分配）`,
-                quantity: g.quantity * times
-              }
-            }
-            // 旧格式：显示具体产品
-            return {
-              productName: g.productName,
-              quantity: g.quantity * times
-            }
-          })
+          gifts: mergedGifts
         })
       }
     }
@@ -677,29 +868,100 @@ const submitOrder = async () => {
     uni.showToast({ title: '请选择代理商', icon: 'none' })
     return
   }
-  if (form.value.items.length === 0) {
-    uni.showToast({ title: '请选择商品', icon: 'none' })
+  
+  // 检查是否有选择商品或组合
+  if (form.value.items.length === 0 && selectedGroups.value.length === 0) {
+    uni.showToast({ title: '请选择商品或组合', icon: 'none' })
     return
   }
   
-  // 整车检查提示
-  if (truckStatus.value === 'insufficient') {
-    const result = await new Promise<boolean>((resolve) => {
-      uni.showModal({
-        title: '整车重量不足',
-        content: `当前重量 ${totalWeight.value.toLocaleString()}kg，未达到整车标准 ${currentTruckType.value?.minWeight.toLocaleString()}kg，是否继续开单？`,
-        success: (res) => resolve(res.confirm)
+  // 如果选择了组合，跳过整车检查
+  if (selectedGroups.value.length === 0) {
+    // 整车检查提示（仅单个商品模式）
+    if (truckStatus.value === 'insufficient') {
+      const result = await new Promise<boolean>((resolve) => {
+        uni.showModal({
+          title: '整车重量不足',
+          content: `当前重量 ${totalWeight.value.toLocaleString()}kg，未达到整车标准 ${currentTruckType.value?.minWeight.toLocaleString()}kg，是否继续开单？`,
+          success: (res) => resolve(res.confirm)
+        })
       })
-    })
-    if (!result) return
-  }
-  
-  if (truckStatus.value === 'overload') {
-    uni.showToast({ title: '超载，请减少商品', icon: 'none' })
-    return
+      if (!result) return
+    }
+    
+    // 超载提醒（仅提醒，允许继续开单）
+    if (truckStatus.value === 'overload' && currentTruckType.value) {
+      const overloadAmount = totalWeight.value - currentTruckType.value.maxWeight
+      const result = await new Promise<boolean>((resolve) => {
+        uni.showModal({
+          title: '⚠️ 超载提醒',
+          content: `当前重量 ${totalWeight.value.toLocaleString()}kg，已超载 ${overloadAmount.toLocaleString()}kg（限制：${currentTruckType.value.maxWeight.toLocaleString()}kg），是否继续开单？`,
+          confirmText: '继续开单',
+          confirmColor: '#FF4D4F',
+          cancelText: '取消',
+          success: (res) => resolve(res.confirm)
+        })
+      })
+      if (!result) return
+    }
   }
   
   const agent = selectedAgent.value!
+  
+  // 合并单个商品和组合商品到最终 items
+  const finalItems: OrderItem[] = [...form.value.items]
+  
+  // 将组合商品添加到 items 中
+  selectedGroups.value.forEach(selectedGroup => {
+    const group = productGroups.value.find(g => g.id === selectedGroup.groupId)
+    if (!group || group.productIds.length === 0) return
+    
+    const groupProducts = store.products.filter(p => group.productIds.includes(p.id))
+    if (groupProducts.length === 0) return
+    
+    // 平均分配组合数量到每个商品
+    const totalQuantity = selectedGroup.quantity
+    const productCount = groupProducts.length
+    const baseQuantity = Math.floor(totalQuantity / productCount)
+    const remainder = totalQuantity % productCount
+    
+    groupProducts.forEach((product, index) => {
+      const quantity = baseQuantity + (index < remainder ? 1 : 0)
+      
+      if (quantity > 0) {
+        const existingItem = finalItems.find(item => item.productId === product.id)
+        if (existingItem) {
+          // 如果同一个商品既单独选择又在组合中，累加数量
+          existingItem.quantity += quantity
+          // 如果该商品已经在组合中，保留组合信息
+          if (existingItem.groupId && existingItem.groupId === selectedGroup.groupId) {
+            // 已经属于同一个组合，不需要更新
+          } else if (!existingItem.groupId) {
+            // 如果该商品之前不是组合商品，现在添加到组合中，需要标记为组合商品
+            existingItem.groupId = selectedGroup.groupId
+            existingItem.groupName = group.name
+            existingItem.groupQuantity = totalQuantity
+          }
+        } else {
+          finalItems.push({
+            productId: product.id,
+            productName: product.name,
+            quantity,
+            price: product.price,
+            weight: product.weight,
+            // 标记为组合商品
+            groupId: selectedGroup.groupId,
+            groupName: group.name,
+            groupQuantity: totalQuantity
+          })
+        }
+      }
+    })
+  })
+  
+  // 计算最终的总重量和总金额
+  const finalTotalWeight = finalItems.reduce((sum, item) => sum + item.quantity * item.weight, 0)
+  const finalTotalAmount = finalItems.reduce((sum, item) => sum + item.quantity * item.price, 0)
   
   // 计算赠品（支持多个促销活动）
   let giftItems: any[] = []
@@ -709,18 +971,28 @@ const submitOrder = async () => {
     form.value.promotionIds.forEach(promotionId => {
       const promotion = store.promotions.find(p => p.id === promotionId)
       if (promotion) {
-        // 计算条件产品组合的数量
-        const conditionQuantity = promotion.conditionProducts && promotion.conditionProducts.length > 0
-          ? form.value.items
-              .filter(item => promotion.conditionProducts.includes(item.productId))
-              .reduce((sum, item) => sum + item.quantity, 0)
-          : totalQuantity.value
+        // 计算条件产品组合的数量（使用 getPromotionQuantity 函数）
+        const conditionQuantity = getPromotionQuantity(promotion)
         
-        const times = Math.floor(conditionQuantity / promotion.threshold)
+        // 计算最小阈值（用于计算倍数）
+        let minThreshold = promotion.threshold
+        if (promotion.conditionDetails && promotion.conditionDetails.length > 0) {
+          minThreshold = Math.min(...promotion.conditionDetails.map((c: any) => c.quantity))
+        }
+        
+        const times = Math.floor(conditionQuantity / minThreshold)
         if (times > 0) {
           promotion.gifts.forEach(g => {
-            // 新格式：按类型随机分配
-            if (g.type && g.productIds && g.productIds.length > 0) {
+            // 优先处理组合赠品（有 groupId 字段）
+            if (g.groupId && g.productIds && g.productIds.length > 0) {
+              // 组合赠品：保存为组合形式，不拆分成单个商品
+              // quantity 是组合的总数量（组合内所有商品的总件数）
+              const totalQuantity = g.quantity * times
+              const groupKey = `group:${g.groupId}`
+              const existingQty = giftMap.get(groupKey) || 0
+              giftMap.set(groupKey, existingQty + totalQuantity)
+            } else if (g.type && g.productIds && g.productIds.length > 0) {
+              // 类型赠品：按类型随机分配
               const totalQuantity = g.quantity * times
               // 从该类型下的产品中随机分配
               for (let i = 0; i < totalQuantity; i++) {
@@ -741,11 +1013,24 @@ const submitOrder = async () => {
     })
     
     // 转换为数组格式
-    giftItems = Array.from(giftMap.entries()).map(([productId, quantity]) => {
-      const product = store.products.find(p => p.id === productId)
+    giftItems = Array.from(giftMap.entries()).map(([key, quantity]) => {
+      // 检查是否是组合赠品
+      if (key.startsWith('group:')) {
+        const groupId = key.replace('group:', '')
+        const group = productGroups.value.find(g => g.id === groupId)
+        return {
+          isGroup: true,
+          groupId: groupId,
+          groupName: group?.name || '组合赠品',
+          productIds: group?.productIds || [],
+          quantity
+        }
+      }
+      // 单个商品赠品
+      const product = store.products.find(p => p.id === key)
       return {
-        productId,
-        productName: product?.name || productId,
+        productId: key,
+        productName: product?.name || key,
         quantity
       }
     })
@@ -755,9 +1040,9 @@ const submitOrder = async () => {
     await store.createOrder({
       agentId: form.value.agentId,
       agentName: agent.name,
-      items: form.value.items,
-      totalWeight: totalWeight.value,
-      totalAmount: totalAmount.value,
+      items: finalItems,
+      totalWeight: finalTotalWeight,
+      totalAmount: finalTotalAmount,
       driverPhone: form.value.driverPhone || undefined,
       promotionId: form.value.promotionIds && form.value.promotionIds.length > 0 ? JSON.stringify(form.value.promotionIds) : undefined, // 传递多个促销ID（JSON格式）
       giftItems: giftItems.length > 0 ? giftItems : undefined,
@@ -913,6 +1198,11 @@ const submitOrder = async () => {
   color: $text-primary;
   text-align: center;
   
+  &--info {
+    background: rgba($primary-color, 0.1);
+    color: $primary-color;
+  }
+  
   &--warning {
     background: rgba($danger-color, 0.1);
   }
@@ -964,10 +1254,105 @@ const submitOrder = async () => {
   gap: 12rpx;
 }
 
+.product-select-section {
+  margin-bottom: 32rpx;
+}
+
+.product-group-select-section {
+  margin-top: 32rpx;
+  padding-top: 32rpx;
+  border-top: 1rpx solid $border-color;
+}
+
+.section-subtitle {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: $text-primary;
+  margin-bottom: 16rpx;
+  display: block;
+}
+
 .product-group-select {
   display: flex;
   flex-direction: column;
   gap: 16rpx;
+}
+
+.empty-groups {
+  padding: 40rpx 20rpx;
+  text-align: center;
+  
+  .empty-text {
+    font-size: 26rpx;
+    color: $text-placeholder;
+  }
+}
+
+.group-select {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.group-select-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx;
+  background: $bg-grey;
+  border-radius: $border-radius;
+  border: 2rpx solid transparent;
+  transition: all 0.2s ease;
+  
+  &--active {
+    background: rgba($primary-color, 0.08);
+    border-color: $primary-color;
+  }
+  
+  &__left {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 16rpx;
+  }
+  
+  &__check {
+    width: 40rpx;
+    height: 40rpx;
+    border: 2rpx solid $border-color;
+    border-radius: 8rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    font-size: 24rpx;
+    color: $primary-color;
+    font-weight: 600;
+  }
+  
+  &__info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4rpx;
+  }
+  
+  &__name {
+    font-size: 28rpx;
+    font-weight: 500;
+    color: $text-primary;
+  }
+  
+  &__products {
+    font-size: 24rpx;
+    color: $text-secondary;
+  }
+  
+  &__quantity {
+    display: flex;
+    align-items: center;
+    gap: 12rpx;
+  }
 }
 
 .gift-type-select {
@@ -1057,6 +1442,26 @@ const submitOrder = async () => {
     border-color: $primary-color;
   }
   
+  &--disabled {
+    opacity: 0.5;
+    background: $bg-grey;
+    
+    .product-select-item__left {
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+    
+    .product-select-item__check {
+      background: $bg-grey;
+      border-color: $border-color;
+      opacity: 0.5;
+    }
+    
+    .product-select-item__name {
+      color: $text-placeholder;
+    }
+  }
+  
   &__left {
     display: flex;
     align-items: center;
@@ -1128,7 +1533,7 @@ const submitOrder = async () => {
 }
 
 .quantity-input {
-  width: 90rpx;
+  width: 135rpx;
   height: 60rpx;
   text-align: center;
   font-size: 32rpx;
@@ -1423,3 +1828,4 @@ const submitOrder = async () => {
   color: $text-secondary;
 }
 </style>
+

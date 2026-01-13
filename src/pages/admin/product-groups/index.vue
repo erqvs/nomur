@@ -73,21 +73,30 @@
                 v-for="product in products" 
                 :key="product.id"
                 class="product-select-item"
-                :class="{ 'product-select-item--active': isProductSelected(product.id) }"
+                :class="{ 
+                  'product-select-item--active': isProductSelected(product.id),
+                  'product-select-item--disabled': isProductDisabled(product.id)
+                }"
               >
                 <view class="product-select-item__left" @tap="toggleProductSelection(product.id)">
                   <view class="product-select-item__check">
                     <text v-if="isProductSelected(product.id)">✓</text>
                   </view>
-                  <text class="product-select-item__name">{{ product.name }}</text>
+                  <view class="product-select-item__info">
+                    <text class="product-select-item__name">{{ product.name }}</text>
+                    <text class="product-select-item__weight">重量：{{ product.weight }}kg</text>
+                  </view>
                 </view>
               </view>
             </view>
             <view v-if="form.productIds.length === 0" class="form-tip">
               <text class="tip-text">请至少选择一个产品</text>
             </view>
-            <view v-else class="form-tip">
-              <text class="tip-text">已选择 {{ form.productIds.length }} 个产品</text>
+            <view v-else-if="weightError" class="form-tip form-tip--error">
+              <text class="tip-text tip-text--error">{{ weightError }}</text>
+            </view>
+            <view v-else class="form-tip form-tip--success">
+              <text class="tip-text tip-text--success">已选择 {{ form.productIds.length }} 个产品（重量：{{ selectedWeight }}kg）</text>
             </view>
           </view>
         </view>
@@ -152,7 +161,37 @@ const isProductSelected = (productId: string) => {
   return form.value.productIds.includes(productId)
 }
 
+// 获取已选择产品的重量（如果已选择产品，返回第一个产品的重量）
+const getSelectedWeight = () => {
+  if (form.value.productIds.length === 0) return null
+  const firstProduct = products.value.find(p => p.id === form.value.productIds[0])
+  return firstProduct?.weight || null
+}
+
+// 检查产品是否应该被禁用（如果已选择产品，且该产品重量与已选择产品不同，则禁用）
+const isProductDisabled = (productId: string) => {
+  if (form.value.productIds.length === 0) return false
+  const selectedWeight = getSelectedWeight()
+  if (selectedWeight === null) return false
+  const product = products.value.find(p => p.id === productId)
+  if (!product) return false
+  // 如果该产品已被选中，不禁用
+  if (form.value.productIds.includes(productId)) return false
+  // 如果该产品重量与已选择产品不同，禁用
+  return product.weight !== selectedWeight
+}
+
 const toggleProductSelection = (productId: string) => {
+  // 如果产品被禁用，不允许选择
+  if (isProductDisabled(productId)) {
+    uni.showToast({ 
+      title: '只能选择重量相同的产品', 
+      icon: 'none',
+      duration: 2000
+    })
+    return
+  }
+  
   const index = form.value.productIds.indexOf(productId)
   if (index > -1) {
     form.value.productIds.splice(index, 1)
@@ -160,6 +199,34 @@ const toggleProductSelection = (productId: string) => {
     form.value.productIds.push(productId)
   }
 }
+
+// 计算已选择产品的重量（用于显示）
+const selectedWeight = computed(() => {
+  if (form.value.productIds.length === 0) return null
+  const firstProduct = products.value.find(p => p.id === form.value.productIds[0])
+  return firstProduct?.weight || null
+})
+
+// 检查重量是否一致
+const weightError = computed(() => {
+  if (form.value.productIds.length === 0) return null
+  if (form.value.productIds.length === 1) return null
+  
+  const selectedWeight = getSelectedWeight()
+  if (selectedWeight === null) return null
+  
+  // 检查所有已选择产品的重量是否相同
+  const allSameWeight = form.value.productIds.every(productId => {
+    const product = products.value.find(p => p.id === productId)
+    return product && product.weight === selectedWeight
+  })
+  
+  if (!allSameWeight) {
+    return '组合中的产品重量必须相同，请重新选择'
+  }
+  
+  return null
+})
 
 const editGroup = (group: ProductGroup, event?: Event) => {
   if (event) {
@@ -216,6 +283,28 @@ const confirmSave = async () => {
   if (form.value.productIds.length === 0) {
     uni.showToast({ title: '请至少选择一个产品', icon: 'none' })
     return
+  }
+  
+  // 验证重量是否一致
+  if (weightError.value) {
+    uni.showToast({ title: weightError.value, icon: 'none' })
+    return
+  }
+  
+  // 再次检查所有产品的重量是否相同
+  if (form.value.productIds.length > 1) {
+    const firstProduct = products.value.find(p => p.id === form.value.productIds[0])
+    if (firstProduct) {
+      const firstWeight = firstProduct.weight
+      const allSameWeight = form.value.productIds.every(productId => {
+        const product = products.value.find(p => p.id === productId)
+        return product && product.weight === firstWeight
+      })
+      if (!allSameWeight) {
+        uni.showToast({ title: '组合中的产品重量必须相同', icon: 'none' })
+        return
+      }
+    }
   }
   
   try {
@@ -506,9 +595,25 @@ const confirmSave = async () => {
     }
   }
   
+  &__info {
+    display: flex;
+    flex-direction: column;
+    gap: 4rpx;
+  }
+  
   &__name {
     font-size: 28rpx;
     color: $text-primary;
+  }
+  
+  &__weight {
+    font-size: 24rpx;
+    color: $text-secondary;
+  }
+  
+  &--disabled {
+    opacity: 0.5;
+    pointer-events: none;
   }
 }
 
@@ -517,11 +622,55 @@ const confirmSave = async () => {
   padding: 12rpx 16rpx;
   background: rgba($primary-color, 0.05);
   border-radius: 8rpx;
+  
+  &--error {
+    background: rgba($danger-color, 0.1);
+  }
+  
+  &--success {
+    background: rgba($success-color, 0.1);
+  }
 }
 
 .tip-text {
   font-size: 24rpx;
   color: $text-secondary;
+  
+  &--error {
+    color: $danger-color;
+  }
+  
+  &--success {
+    color: $success-color;
+  }
+}
+
+.form-tip {
+  margin-top: 12rpx;
+  padding: 12rpx 16rpx;
+  background: rgba($primary-color, 0.05);
+  border-radius: 8rpx;
+  
+  &--error {
+    background: rgba($danger-color, 0.1);
+  }
+  
+  &--success {
+    background: rgba($success-color, 0.1);
+  }
+}
+
+.tip-text {
+  font-size: 24rpx;
+  color: $text-secondary;
+  
+  &--error {
+    color: $danger-color;
+  }
+  
+  &--success {
+    color: $success-color;
+  }
 }
 
 .modal-actions {

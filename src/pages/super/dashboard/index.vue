@@ -1,5 +1,20 @@
 <template>
   <view class="dashboard">
+    <!-- 自定义导航栏 -->
+    <view class="custom-navbar">
+      <view class="navbar-content">
+        <text class="navbar-title">数据驾驶舱</text>
+        <view class="switch-btn" @tap="switchAccount">
+          <text>切换账号</text>
+        </view>
+      </view>
+    </view>
+    
+    <!-- 管理员身份标签 -->
+    <view class="admin-badge">
+      <text class="admin-badge__text">超级管理员</text>
+    </view>
+    
     <!-- 顶部操作栏 -->
     <view class="top-bar">
       <view class="quick-link" @tap="goToProducts">
@@ -11,11 +26,14 @@
       <view class="quick-link" @tap="goToTrucks">
         <text>车型管理</text>
       </view>
+      <view class="quick-link" @tap="goToProductGroups">
+        <text>产品组合</text>
+      </view>
+      <view class="quick-link" @tap="goToQuickOrder">
+        <text>极速开单</text>
+      </view>
       <view class="quick-link" @tap="goToOrders">
         <text>订单列表</text>
-      </view>
-      <view class="switch-btn" @tap="switchAccount">
-        <text>切换账号</text>
       </view>
     </view>
     
@@ -88,7 +106,7 @@
     </view>
     
     <!-- 代理列表 -->
-    <view class="card">
+    <view class="card" v-if="agents.length > 0">
       <view class="section-title">代理商列表</view>
       <view class="agent-list">
         <view 
@@ -107,6 +125,14 @@
           </view>
           <view class="agent-item__arrow">›</view>
         </view>
+      </view>
+    </view>
+    
+    <!-- 空状态提示 -->
+    <view v-if="agents.length === 0" class="card">
+      <view class="empty-state">
+        <image src="/static/icons/users.svg" class="empty-icon" mode="aspectFit" />
+        <text class="empty-text">暂无代理商</text>
       </view>
     </view>
     
@@ -132,7 +158,6 @@ const updateTabBarPath = () => {
     const pages = getCurrentPages()
     if (pages.length > 0) {
       const route = '/' + pages[pages.length - 1].route
-      // 触发全局事件更新 tabbar
       uni.$emit('update-tabbar-path', route)
     }
   } catch (error) {
@@ -140,16 +165,12 @@ const updateTabBarPath = () => {
   }
 }
 
-// 页面挂载时更新路径
 onMounted(() => {
   updateTabBarPath()
 })
 
-// 页面显示时刷新数据（包括从其他页面返回时）
 onShow(async () => {
-  // 确保 tabbar 路径正确
   updateTabBarPath()
-  
   await Promise.all([
     store.loadStatistics(),
     store.loadAgents()
@@ -158,14 +179,16 @@ onShow(async () => {
 
 // 计算百分比（年度）
 const getPercentage = (quantity: number) => {
-  const max = Math.max(...globalStats.value.productStats.map(s => s.quantity))
-  return Math.round((quantity / max) * 100)
+  if (!globalStats.value.productStats || globalStats.value.productStats.length === 0) return 0
+  const max = Math.max(...globalStats.value.productStats.map(s => s.quantity), 1)
+  return max > 0 ? Math.round((quantity / max) * 100) : 0
 }
 
 // 计算百分比（30天）
 const getPercentage30 = (quantity: number) => {
-  const max = Math.max(...globalStats.value.last30DaysProductStats.map(s => s.quantity))
-  return Math.round((quantity / max) * 100)
+  if (!globalStats.value.last30DaysProductStats || globalStats.value.last30DaysProductStats.length === 0) return 0
+  const max = Math.max(...globalStats.value.last30DaysProductStats.map(s => s.quantity), 1)
+  return max > 0 ? Math.round((quantity / max) * 100) : 0
 }
 
 // 格式化余额
@@ -181,28 +204,38 @@ const formatBalance = (balance: number) => {
 // 跳转代理详情
 const goToAgentDetail = (agentId: string) => {
   uni.navigateTo({
-    url: `/pages/admin/agents/detail?id=${agentId}`
+    url: `/pages/super/agents/detail?id=${agentId}`
   })
 }
 
 // 跳转商品管理
 const goToProducts = () => {
-  uni.navigateTo({ url: '/pages/admin/products/index' })
+  uni.navigateTo({ url: '/pages/super/products/index' })
 }
 
 // 跳转促销管理
 const goToPromotions = () => {
-  uni.navigateTo({ url: '/pages/admin/promotions/index' })
+  uni.navigateTo({ url: '/pages/super/promotions/index' })
 }
 
 // 跳转车型管理
 const goToTrucks = () => {
-  uni.navigateTo({ url: '/pages/admin/trucks/index' })
+  uni.navigateTo({ url: '/pages/super/trucks/index' })
+}
+
+// 跳转产品组合
+const goToProductGroups = () => {
+  uni.navigateTo({ url: '/pages/super/product-groups/index' })
+}
+
+// 跳转极速开单
+const goToQuickOrder = () => {
+  uni.navigateTo({ url: '/pages/super/orders/quick-order' })
 }
 
 // 跳转订单列表
 const goToOrders = () => {
-  uni.navigateTo({ url: '/pages/super/orders/index' })
+  uni.navigateTo({ url: '/pages/super/orders/list' })
 }
 
 // 切换账号
@@ -212,19 +245,104 @@ const switchAccount = () => {
 </script>
 
 <style lang="scss" scoped>
+// 确保没有任何输入框或表单元素导致红色边框
 .dashboard {
-  padding: 24rpx;
-  padding-bottom: calc(140rpx + env(safe-area-inset-bottom)); // 为 tabbar 预留空间
+  min-height: 100vh;
+  padding: 0 24rpx;
+  padding-bottom: calc(100rpx + env(safe-area-inset-bottom));
+  background: $bg-page;
+  
+  // 禁止任何输入框的验证样式
+  input,
+  textarea,
+  select {
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    
+    &:invalid,
+    &:required {
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
+    }
+  }
 }
 
+// 自定义导航栏
+.custom-navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(44px + env(safe-area-inset-top));
+  background: $primary-color;
+  z-index: 1000;
+  padding-top: env(safe-area-inset-top);
+}
+
+.navbar-content {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24rpx;
+}
+
+.navbar-title {
+  font-size: 36rpx;
+  font-weight: 600;
+  color: #fff;
+  flex: 1;
+  text-align: center;
+}
+
+.switch-btn {
+  padding: 8rpx 16rpx;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8rpx;
+  font-size: 24rpx;
+  color: #fff;
+  
+  text {
+    display: block;
+  }
+  
+  &:active {
+    background: rgba(255, 255, 255, 0.3);
+  }
+}
+
+// 管理员身份标签
+.admin-badge {
+  margin-top: calc(44px + env(safe-area-inset-top) + 24rpx);
+  margin-bottom: 24rpx;
+  padding: 16rpx 24rpx;
+  background: #fff;
+  border-radius: $border-radius;
+  box-shadow: $shadow-sm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-badge__text {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: $primary-color;
+}
+
+// 顶部操作栏
 .top-bar {
   display: flex;
   gap: 16rpx;
   margin-bottom: 24rpx;
+  flex-wrap: wrap;
 }
 
 .quick-link {
   flex: 1;
+  min-width: calc(33.333% - 12rpx);
   padding: 20rpx;
   background: #fff;
   border-radius: $border-radius;
@@ -233,23 +351,16 @@ const switchAccount = () => {
   color: $primary-color;
   box-shadow: $shadow-sm;
   
+  text {
+    display: block;
+  }
+  
   &:active {
     background: $bg-hover;
   }
 }
 
-.switch-btn {
-  padding: 20rpx 24rpx;
-  background: $bg-grey;
-  border-radius: $border-radius;
-  font-size: 26rpx;
-  color: $text-secondary;
-  
-  &:active {
-    background: darken($bg-grey, 5%);
-  }
-}
-
+// 统计卡片
 .stats-header {
   display: flex;
   gap: 24rpx;
@@ -280,14 +391,7 @@ const switchAccount = () => {
     align-items: center;
     justify-content: center;
   }
-}
-
-.stats-icon {
-  width: 48rpx;
-  height: 48rpx;
-}
-
-.stats-card {
+  
   &__info {
     display: flex;
     flex-direction: column;
@@ -304,6 +408,30 @@ const switchAccount = () => {
     opacity: 0.9;
     margin-top: 4rpx;
   }
+}
+
+.stats-icon {
+  width: 48rpx;
+  height: 48rpx;
+}
+
+// 卡片
+.card {
+  background: #fff;
+  border-radius: $border-radius-lg;
+  padding: 32rpx;
+  box-shadow: $shadow-sm;
+  margin-bottom: 24rpx;
+}
+
+.section-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: $text-primary;
+  margin-bottom: 24rpx;
+  display: block;
+  padding-left: 8rpx;
+  border-left: 4rpx solid $primary-color;
 }
 
 .product-stats {
@@ -331,8 +459,23 @@ const switchAccount = () => {
   }
 }
 
-.progress-inner--orange {
-  background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
+.progress-bar {
+  height: 12rpx;
+  background: $bg-grey;
+  border-radius: 6rpx;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-inner {
+  height: 100%;
+  background: linear-gradient(90deg, $primary-color 0%, lighten($primary-color, 10%) 100%);
+  border-radius: 6rpx;
+  transition: width 0.3s ease;
+  
+  &--orange {
+    background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
+  }
 }
 
 .agent-list {
@@ -398,5 +541,23 @@ const switchAccount = () => {
 .amount-negative {
   color: $danger-color !important;
 }
-</style>
 
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60rpx 0;
+}
+
+.empty-icon {
+  width: 100rpx;
+  height: 100rpx;
+  opacity: 0.3;
+  margin-bottom: 20rpx;
+}
+
+.empty-text {
+  font-size: 28rpx;
+  color: $text-placeholder;
+}
+</style>

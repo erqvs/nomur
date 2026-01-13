@@ -1,8 +1,0 @@
-{
-  "navigationBarTitleText": "收款人",
-  "usingComponents": {
-    "image-uploader": "../../../components/ImageUploader/index",
-    "quick-input": "../../../components/QuickInput/index",
-    "custom-tab-bar": "../../../components/CustomTabBar/index"
-  }
-}

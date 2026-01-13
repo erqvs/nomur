@@ -1,8 +1,0 @@
-{
-  "navigationBarTitleText": "财务管理",
-  "usingComponents": {
-    "tag-select": "../../../components/TagSelect/index",
-    "quick-input": "../../../components/QuickInput/index",
-    "image-uploader": "../../../components/ImageUploader/index"
-  }
-}

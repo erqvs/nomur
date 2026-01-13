@@ -1,7 +1,0 @@
-{
-  "navigationBarTitleText": "编辑商品",
-  "usingComponents": {
-    "quick-input": "../../../components/QuickInput/index",
-    "image-uploader": "../../../components/ImageUploader/index"
-  }
-}

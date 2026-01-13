@@ -1,5 +1,0 @@
-<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
-  <rect width="200" height="200" fill="#f5f7fa" stroke="#e0e0e0" stroke-width="2"/>
-  <text x="100" y="90" font-family="Arial" font-size="48" fill="#b0b0b0" text-anchor="middle">📦</text>
-  <text x="100" y="140" font-family="Arial" font-size="16" fill="#999999" text-anchor="middle">商品图片</text>
-</svg>

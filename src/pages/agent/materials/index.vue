@@ -55,7 +55,8 @@
         <image src="/static/icons/arrow-right.svg" class="netdisk-arrow" mode="aspectFit" />
       </view>
       
-      <view v-else class="empty-state">
+      <!-- 空状态：只在没有素材且没有网盘链接时显示 -->
+      <view v-if="currentProduct.materials.length === 0 && !currentProduct.netdiskUrl" class="empty-state">
         <image src="/static/icons/folder.svg" class="empty-icon" mode="aspectFit" />
         <text class="empty-text">该产品暂无宣传素材</text>
       </view>
@@ -71,6 +72,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import ImagePreview from '@/components/ImagePreview/index.vue'
+import { isWeChatBrowser, isMobile } from '@/utils/browser'
 
 const store = useAppStore()
 
@@ -81,47 +84,181 @@ const currentProduct = computed(() =>
   products.value.find(p => p.id === currentProductId.value)
 )
 
+// 图片预览状态
+const showImagePreview = ref(false)
+const previewImageUrls = ref<string[]>([])
+const previewImageIndex = ref(0)
+
 // 预览图片
 const previewImage = (current: string, urls: string[]) => {
-  uni.previewImage({
-    current,
-    urls
-  })
+  previewImageUrls.value = urls
+  previewImageIndex.value = urls.indexOf(current)
+  if (previewImageIndex.value < 0) previewImageIndex.value = 0
+  showImagePreview.value = true
 }
 
 // 保存单张图片
-const saveImage = (url: string) => {
+const saveImage = async (url: string) => {
   uni.showLoading({ title: '保存中...' })
   
   // #ifdef H5
-  // H5 环境提示
-  uni.hideLoading()
-  uni.showModal({
-    title: '提示',
-    content: '请长按图片选择"保存图片"',
-    showCancel: false
-  })
+  // 检测是否在移动端（包括微信浏览器和其他移动浏览器）
+  if (isMobile() || isWeChatBrowser()) {
+    // 移动端浏览器：先尝试使用 uni API 保存图片到相册，失败则降级为下载
+    try {
+      // 先下载图片
+      const downloadRes = await new Promise<UniApp.DownloadSuccessData>((resolve, reject) => {
+        uni.downloadFile({
+          url,
+          success: (res) => {
+            if (res.statusCode === 200) {
+              resolve(res)
+            } else {
+              reject(new Error('下载失败'))
+            }
+          },
+          fail: reject
+        })
+      })
+      
+      // 尝试保存到相册
+      try {
+        await new Promise<void>((resolve, reject) => {
+          uni.saveImageToPhotosAlbum({
+            filePath: downloadRes.tempFilePath,
+            success: () => {
+              uni.hideLoading()
+              uni.showToast({ title: '保存成功', icon: 'success' })
+              resolve()
+            },
+            fail: (err) => {
+              // 如果保存失败，降级为下载方式
+              reject(err)
+            }
+          })
+        })
+      } catch (saveError: any) {
+        // 保存到相册失败，降级为下载方式
+        console.log('保存到相册失败，降级为下载方式:', saveError)
+        // 使用下载方式
+        const response = await fetch(url)
+        const blob = await response.blob()
+        const blobUrl = window.URL.createObjectURL(blob)
+        
+        const urlParts = url.split('/')
+        const fileName = urlParts[urlParts.length - 1] || 'material.jpg'
+        
+        const link = document.createElement('a')
+        link.href = blobUrl
+        link.download = fileName
+        link.style.display = 'none'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        
+        window.URL.revokeObjectURL(blobUrl)
+        
+        uni.hideLoading()
+        uni.showToast({ title: '下载成功', icon: 'success' })
+      }
+    } catch (error) {
+      // uni.downloadFile 失败，使用传统下载方式
+      console.log('uni API 不可用，使用传统下载方式:', error)
+      try {
+        const response = await fetch(url)
+        const blob = await response.blob()
+        const blobUrl = window.URL.createObjectURL(blob)
+        
+        const urlParts = url.split('/')
+        const fileName = urlParts[urlParts.length - 1] || 'material.jpg'
+        
+        const link = document.createElement('a')
+        link.href = blobUrl
+        link.download = fileName
+        link.style.display = 'none'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        
+        window.URL.revokeObjectURL(blobUrl)
+        
+        uni.hideLoading()
+        uni.showToast({ title: '下载成功', icon: 'success' })
+      } catch (downloadError) {
+        uni.hideLoading()
+        uni.showToast({ title: '下载失败', icon: 'none' })
+        console.error('下载图片失败:', downloadError)
+      }
+    }
+  } else {
+    // 桌面浏览器：直接使用下载方式
+    try {
+      const response = await fetch(url)
+      const blob = await response.blob()
+      const blobUrl = window.URL.createObjectURL(blob)
+      
+      // 从 URL 中提取文件名
+      const urlParts = url.split('/')
+      const fileName = urlParts[urlParts.length - 1] || 'material.jpg'
+      
+      // 创建下载链接
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = fileName
+      link.style.display = 'none'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      
+      // 释放 blob URL
+      window.URL.revokeObjectURL(blobUrl)
+      
+      uni.hideLoading()
+      uni.showToast({ title: '下载成功', icon: 'success' })
+    } catch (error) {
+      uni.hideLoading()
+      uni.showToast({ title: '下载失败', icon: 'none' })
+      console.error('下载图片失败:', error)
+    }
+  }
   // #endif
   
   // #ifdef MP-WEIXIN
+  // 小程序环境：下载并保存到相册
   uni.downloadFile({
     url,
     success: (res) => {
-      uni.saveImageToPhotosAlbum({
-        filePath: res.tempFilePath,
-        success: () => {
-          uni.hideLoading()
-          uni.showToast({ title: '保存成功', icon: 'success' })
-        },
-        fail: () => {
-          uni.hideLoading()
-          uni.showToast({ title: '保存失败', icon: 'none' })
-        }
-      })
+      if (res.statusCode === 200) {
+        uni.saveImageToPhotosAlbum({
+          filePath: res.tempFilePath,
+          success: () => {
+            uni.hideLoading()
+            uni.showToast({ title: '保存成功', icon: 'success' })
+          },
+          fail: (err) => {
+            uni.hideLoading()
+            // 处理权限拒绝的情况
+            if (err.errMsg && err.errMsg.includes('auth deny')) {
+              uni.showModal({
+                title: '需要授权',
+                content: '保存图片需要授权访问相册，请在设置中开启',
+                showCancel: false,
+                confirmText: '知道了'
+              })
+            } else {
+              uni.showToast({ title: '保存失败，请重试', icon: 'none' })
+            }
+          }
+        })
+      } else {
+        uni.hideLoading()
+        uni.showToast({ title: '下载失败', icon: 'none' })
+      }
     },
-    fail: () => {
+    fail: (err) => {
       uni.hideLoading()
-      uni.showToast({ title: '下载失败', icon: 'none' })
+      console.error('下载图片失败:', err)
+      uni.showToast({ title: '下载失败，请检查网络', icon: 'none' })
     }
   })
   // #endif
@@ -155,46 +292,223 @@ const downloadAll = async () => {
   if (materials.length === 0) return
   
   // #ifdef H5
-  uni.showModal({
-    title: '提示',
-    content: `请逐个长按保存 ${materials.length} 张图片`,
-    showCancel: false
-  })
+  // 检测是否在移动端（包括微信浏览器和其他移动浏览器）
+  if (isMobile() || isWeChatBrowser()) {
+    // 移动端浏览器：先尝试使用 uni API 批量保存，失败则降级为下载
+    uni.showLoading({ title: `保存中 0/${materials.length}` })
+    
+    let successCount = 0
+    let useDownloadFallback = false // 标记是否使用下载降级方案
+    
+    for (let i = 0; i < materials.length; i++) {
+      try {
+        // 尝试使用 uni API 下载图片
+        let downloadRes: UniApp.DownloadSuccessData
+        try {
+          downloadRes = await new Promise<UniApp.DownloadSuccessData>((resolve, reject) => {
+            uni.downloadFile({
+              url: materials[i],
+              success: (res) => {
+                if (res.statusCode === 200) {
+                  resolve(res)
+                } else {
+                  reject(new Error('下载失败'))
+                }
+              },
+              fail: reject
+            })
+          })
+        } catch (downloadError) {
+          // uni.downloadFile 失败，使用下载方式
+          useDownloadFallback = true
+          throw downloadError
+        }
+        
+        // 尝试保存到相册
+        try {
+          await new Promise<void>((resolve, reject) => {
+            uni.saveImageToPhotosAlbum({
+              filePath: downloadRes.tempFilePath,
+              success: () => {
+                successCount++
+                uni.showLoading({ title: `保存中 ${successCount}/${materials.length}` })
+                resolve()
+              },
+              fail: (err) => {
+                // 保存失败，使用下载方式
+                reject(err)
+              }
+            })
+          })
+        } catch (saveError) {
+          // 保存到相册失败，降级为下载方式
+          useDownloadFallback = true
+          throw saveError
+        }
+        
+        // 延迟一下，避免操作过快
+        await new Promise(resolve => setTimeout(resolve, 200))
+      } catch (error: any) {
+        // 如果 uni API 失败，使用传统下载方式
+        if (useDownloadFallback || i === 0) {
+          // 第一次失败时，切换到下载模式
+          if (i === 0) {
+            useDownloadFallback = true
+            uni.showLoading({ title: `下载中 0/${materials.length}` })
+          }
+          
+          try {
+            const response = await fetch(materials[i])
+            const blob = await response.blob()
+            const blobUrl = window.URL.createObjectURL(blob)
+            
+            const urlParts = materials[i].split('/')
+            const fileName = urlParts[urlParts.length - 1] || `material-${i + 1}.jpg`
+            
+            const link = document.createElement('a')
+            link.href = blobUrl
+            link.download = fileName
+            link.style.display = 'none'
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            
+            window.URL.revokeObjectURL(blobUrl)
+            
+            successCount++
+            uni.showLoading({ title: `下载中 ${successCount}/${materials.length}` })
+            
+            // 延迟一下，避免浏览器阻止多个下载
+            await new Promise(resolve => setTimeout(resolve, 300))
+          } catch (downloadError) {
+            console.error(`下载第 ${i + 1} 张图片失败:`, downloadError)
+          }
+        } else {
+          console.error(`保存第 ${i + 1} 张图片失败:`, error)
+        }
+      }
+    }
+    
+    uni.hideLoading()
+    uni.showToast({
+      title: useDownloadFallback 
+        ? `成功下载 ${successCount} 张` 
+        : `成功保存 ${successCount} 张`,
+      icon: successCount === materials.length ? 'success' : 'none',
+      duration: successCount === materials.length ? 1500 : 2000
+    })
+  } else {
+    // 普通浏览器：批量下载图片
+    uni.showLoading({ title: `下载中 0/${materials.length}` })
+    
+    let successCount = 0
+    for (let i = 0; i < materials.length; i++) {
+      try {
+        const response = await fetch(materials[i])
+        const blob = await response.blob()
+        const blobUrl = window.URL.createObjectURL(blob)
+        
+        // 从 URL 中提取文件名
+        const urlParts = materials[i].split('/')
+        const fileName = urlParts[urlParts.length - 1] || `material-${i + 1}.jpg`
+        
+        // 创建下载链接
+        const link = document.createElement('a')
+        link.href = blobUrl
+        link.download = fileName
+        link.style.display = 'none'
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        
+        // 释放 blob URL
+        window.URL.revokeObjectURL(blobUrl)
+        
+        successCount++
+        uni.showLoading({ title: `下载中 ${successCount}/${materials.length}` })
+        
+        // 延迟一下，避免浏览器阻止多个下载
+        await new Promise(resolve => setTimeout(resolve, 300))
+      } catch (error) {
+        console.error(`下载第 ${i + 1} 张图片失败:`, error)
+        // 忽略单个失败，继续下载其他图片
+      }
+    }
+    
+    uni.hideLoading()
+    uni.showToast({
+      title: `成功下载 ${successCount} 张`,
+      icon: successCount === materials.length ? 'success' : 'none'
+    })
+  }
   // #endif
   
   // #ifdef MP-WEIXIN
+  // 小程序环境：批量下载并保存到相册
   uni.showLoading({ title: `保存中 0/${materials.length}` })
   
   let successCount = 0
+  let hasAuthError = false
+  
   for (let i = 0; i < materials.length; i++) {
     try {
+      // 下载图片
       const res = await new Promise<UniApp.DownloadSuccessData>((resolve, reject) => {
         uni.downloadFile({
           url: materials[i],
-          success: resolve,
+          success: (downloadRes) => {
+            if (downloadRes.statusCode === 200) {
+              resolve(downloadRes)
+            } else {
+              reject(new Error('下载失败'))
+            }
+          },
           fail: reject
         })
       })
       
+      // 保存到相册
       await new Promise<void>((resolve, reject) => {
         uni.saveImageToPhotosAlbum({
           filePath: res.tempFilePath,
           success: () => resolve(),
-          fail: () => reject()
+          fail: (err) => {
+            // 检查是否是权限问题
+            if (err.errMsg && err.errMsg.includes('auth deny')) {
+              hasAuthError = true
+            }
+            reject(err)
+          }
         })
       })
       
       successCount++
       uni.showLoading({ title: `保存中 ${successCount}/${materials.length}` })
-    } catch {
-      // 忽略单个失败
+      
+      // 延迟一下，避免操作过快
+      await new Promise(resolve => setTimeout(resolve, 200))
+    } catch (error: any) {
+      // 如果是权限问题，提示用户并中断
+      if (hasAuthError && i === 0) {
+        uni.hideLoading()
+        uni.showModal({
+          title: '需要授权',
+          content: '保存图片需要授权访问相册，请在设置中开启相册权限',
+          showCancel: false,
+          confirmText: '知道了'
+        })
+        return
+      }
+      // 其他错误忽略，继续下载下一张
+      console.error(`保存第 ${i + 1} 张图片失败:`, error)
     }
   }
   
   uni.hideLoading()
   uni.showToast({
     title: `成功保存 ${successCount} 张`,
-    icon: successCount === materials.length ? 'success' : 'none'
+    icon: successCount === materials.length ? 'success' : 'none',
+    duration: successCount === materials.length ? 1500 : 2000
   })
   // #endif
 }
@@ -212,6 +526,11 @@ const downloadAll = async () => {
   font-size: 26rpx;
   color: $text-secondary;
   margin-bottom: 24rpx;
+  padding: 0 24rpx;
+  word-wrap: break-word;
+  word-break: break-all;
+  white-space: normal;
+  line-height: 1.6;
 }
 
 .product-tabs {
@@ -251,7 +570,12 @@ const downloadAll = async () => {
   &__name {
     font-size: 24rpx;
     color: $text-primary;
-    white-space: nowrap;
+    white-space: normal;
+    word-wrap: break-word;
+    word-break: break-all;
+    text-align: center;
+    line-height: 1.4;
+    width: 100%;
   }
   
   &--active &__name {
@@ -272,17 +596,24 @@ const downloadAll = async () => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24rpx;
+  gap: 16rpx;
 }
 
 .section-title {
   font-size: 32rpx;
   font-weight: 600;
   color: $text-primary;
+  flex: 1;
+  word-wrap: break-word;
+  word-break: break-all;
+  white-space: normal;
 }
 
 .section-count {
   font-size: 26rpx;
   color: $text-secondary;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .materials-grid {
@@ -411,8 +742,10 @@ const downloadAll = async () => {
 }
 
 .empty-icon {
-  font-size: 64rpx;
+  width: 128rpx;
+  height: 128rpx;
   margin-bottom: 16rpx;
+  opacity: 0.4;
 }
 
 .empty-text {

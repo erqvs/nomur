@@ -1,6 +1,0 @@
-{
-  "navigationBarTitleText": "修改交易记录",
-  "usingComponents": {
-    "quick-input": "../../../components/QuickInput/index"
-  }
-}

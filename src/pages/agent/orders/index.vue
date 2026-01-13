@@ -13,13 +13,13 @@
         
         <view class="order-card__products">
           <view 
-            v-for="item in order.items" 
-            :key="item.productId"
+            v-for="item in getDisplayItems(order.items)" 
+            :key="item.key"
             class="product-row"
           >
-            <text class="product-row__name">{{ item.productName }}</text>
+            <text class="product-row__name">{{ item.name }}</text>
             <text class="product-row__quantity">x{{ item.quantity }}</text>
-            <text class="product-row__subtotal">¥{{ (item.quantity * item.price).toLocaleString() }}</text>
+            <text class="product-row__subtotal">¥{{ item.totalPrice.toLocaleString() }}</text>
           </view>
         </view>
         
@@ -39,9 +39,15 @@
             <text class="order-card__time">{{ formatTime(order.createdAt) }}</text>
             <text v-if="order.driverPhone" class="order-card__driver">司机：{{ order.driverPhone }}</text>
           </view>
-          <view class="order-card__share" @tap.stop="shareOrder(order.id)">
-            <image src="/static/icons/arrow-right.svg" class="share-icon" mode="aspectFit" />
-            <text class="share-text">分享</text>
+          <view class="order-card__actions">
+            <view class="order-card__detail" @tap.stop="goToDetail(order.id)">
+              <image src="/static/icons/arrow-right.svg" class="action-icon" mode="aspectFit" />
+              <text class="action-text">详情</text>
+            </view>
+            <view class="order-card__share" @tap.stop="shareOrder(order.id)">
+              <image src="/static/icons/arrow-right.svg" class="share-icon" mode="aspectFit" />
+              <text class="share-text">分享</text>
+            </view>
           </view>
         </view>
         
@@ -55,7 +61,24 @@
                 {{ name }}<text v-if="idx < order.promotionNames.length - 1">、</text>
               </text>
             </view>
-            <view class="gifts-items">
+            <!-- 组合赠品显示（优先检查 giftItems 中的组合赠品） -->
+            <view v-if="hasGroupGifts(order)" class="gifts-items">
+              <text class="gifts-label">赠品：</text>
+              <template v-for="gift in order.giftItems" :key="gift.groupId || gift.productId">
+                <template v-if="gift.isGroup">
+                  <text class="gift-group-name">{{ gift.groupName }}</text>
+                  <text class="gift-group-quantity">x{{ gift.quantity }}箱</text>
+                </template>
+              </template>
+            </view>
+            <!-- 旧格式：groupGiftInfo -->
+            <view v-else-if="order.groupGiftInfo" class="gifts-items">
+              <text class="gifts-label">赠品：</text>
+              <text class="gift-group-name">{{ order.groupGiftInfo.groupName }}</text>
+              <text class="gift-group-quantity">x{{ order.groupGiftInfo.totalRequirement }}箱</text>
+            </view>
+            <!-- 单个产品赠品显示 -->
+            <view v-else class="gifts-items">
               <text class="gifts-label">赠品：</text>
               <text v-for="gift in order.giftItems" :key="gift.productId" class="gift-item">
                 {{ gift.productName }} x{{ gift.quantity }}
@@ -85,6 +108,54 @@ const orders = computed(() => store.getAgentOrders(store.currentAgentId))
 const filteredOrders = computed(() => {
   return orders.value
 })
+
+// 处理订单商品显示：按组合分组，如果item有groupId，只显示一次组合名称和组合数量
+const getDisplayItems = (items: any[]) => {
+  if (!items || items.length === 0) return []
+  
+  const displayMap = new Map<string, { key: string; name: string; quantity: number; totalPrice: number }>()
+  
+  items.forEach((item: any) => {
+    if (item.groupId && item.groupName && item.groupQuantity) {
+      // 组合商品：按groupId分组，只显示一次组合名称和组合数量
+      const key = `group-${item.groupId}`
+      if (!displayMap.has(key)) {
+        // 计算组合的总价格（组合中所有商品的价格总和）
+        const groupItems = items.filter((i: any) => i.groupId === item.groupId)
+        const totalPrice = groupItems.reduce((sum: number, i: any) => sum + (i.quantity || 0) * (i.price || 0), 0)
+        displayMap.set(key, {
+          key,
+          name: item.groupName,
+          quantity: item.groupQuantity,
+          totalPrice
+        })
+      }
+    } else {
+      // 单个商品：正常显示
+      const key = `product-${item.productId}`
+      displayMap.set(key, {
+        key,
+        name: item.productName,
+        quantity: item.quantity,
+        totalPrice: item.quantity * item.price
+      })
+    }
+  })
+  
+  return Array.from(displayMap.values())
+}
+
+// 检查订单是否有组合赠品
+const hasGroupGifts = (order: any) => {
+  if (!order.giftItems || order.giftItems.length === 0) return false
+  return order.giftItems.some((gift: any) => gift.isGroup === true)
+}
+
+const goToDetail = (orderId: string) => {
+  uni.navigateTo({
+    url: `/pages/agent/orders/detail?id=${orderId}`
+  })
+}
 
 const shareOrder = (orderId: string) => {
   const shareUrl = `https://nomur.linkmate.site/#/pages/admin/orders/detail?id=${orderId}`
@@ -205,6 +276,58 @@ const formatTime = (time: string | Date) => {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    margin-top: 20rpx;
+    padding-top: 20rpx;
+    border-top: 1rpx solid $border-color;
+  }
+  
+  &__footer-left {
+    display: flex;
+    flex-direction: column;
+    gap: 8rpx;
+    flex: 1;
+  }
+  
+  &__actions {
+    display: flex;
+    gap: 12rpx;
+    align-items: center;
+  }
+  
+  &__detail {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6rpx;
+    padding: 12rpx 20rpx;
+    background: linear-gradient(135deg, rgba($primary-color, 0.1) 0%, rgba($primary-color, 0.15) 100%);
+    border: 1rpx solid rgba($primary-color, 0.2);
+    border-radius: 12rpx;
+    min-width: 120rpx;
+    transition: all 0.2s;
+    
+    &:active {
+      background: linear-gradient(135deg, rgba($primary-color, 0.2) 0%, rgba($primary-color, 0.25) 100%);
+      transform: scale(0.98);
+    }
+  }
+  
+  &__share {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6rpx;
+    padding: 12rpx 20rpx;
+    background: linear-gradient(135deg, rgba($text-secondary, 0.08) 0%, rgba($text-secondary, 0.12) 100%);
+    border: 1rpx solid rgba($text-secondary, 0.15);
+    border-radius: 12rpx;
+    min-width: 120rpx;
+    transition: all 0.2s;
+    
+    &:active {
+      background: linear-gradient(135deg, rgba($text-secondary, 0.15) 0%, rgba($text-secondary, 0.2) 100%);
+      transform: scale(0.98);
+    }
   }
   
   &__time {
@@ -319,6 +442,25 @@ const formatTime = (time: string | Date) => {
 .gift-item {
   color: $text-primary;
   margin-left: 12rpx;
+  
+  &::after {
+    content: '、';
+  }
+  
+  &:last-child::after {
+    content: '';
+  }
+}
+
+.gift-group-name {
+  font-weight: 500;
+  color: $text-primary;
+  margin-left: 12rpx;
+}
+
+.gift-group-quantity {
+  color: $text-secondary;
+  margin-left: 8rpx;
 }
 
 .empty-state {
@@ -340,16 +482,28 @@ const formatTime = (time: string | Date) => {
   color: $text-placeholder;
 }
 
-.share-icon {
-  width: 32rpx;
-  height: 32rpx;
+.action-icon {
+  width: 28rpx;
+  height: 28rpx;
   filter: brightness(0) saturate(100%) invert(40%) sepia(93%) saturate(1352%) hue-rotate(200deg) brightness(97%) contrast(96%);
+}
+
+.action-text {
+  font-size: 26rpx;
+  color: $primary-color;
+  font-weight: 600;
+}
+
+.share-icon {
+  width: 28rpx;
+  height: 28rpx;
+  filter: brightness(0) saturate(100%) invert(50%) sepia(0%) saturate(0%) hue-rotate(0deg) brightness(60%) contrast(100%);
 }
 
 .share-text {
   font-size: 26rpx;
-  color: $primary-color;
-  font-weight: 500;
+  color: $text-secondary;
+  font-weight: 600;
 }
 </style>
 

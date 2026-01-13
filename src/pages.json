@@ -77,6 +77,12 @@
       }
     },
     {
+      "path": "pages/admin/payees/detail",
+      "style": {
+        "navigationBarTitleText": "收款账户明细"
+      }
+    },
+    {
       "path": "pages/admin/trucks/index",
       "style": {
         "navigationBarTitleText": "车型管理"
@@ -101,6 +107,12 @@
       }
     },
     {
+      "path": "pages/admin/transactions/edit",
+      "style": {
+        "navigationBarTitleText": "修改交易记录"
+      }
+    },
+    {
       "path": "pages/agent/home/index",
       "style": {
         "navigationBarTitleText": "我的业绩",
@@ -112,6 +124,12 @@
       "path": "pages/agent/orders/index",
       "style": {
         "navigationBarTitleText": "我的订单"
+      }
+    },
+    {
+      "path": "pages/agent/orders/detail",
+      "style": {
+        "navigationBarTitleText": "订单详情"
       }
     },
     {
@@ -139,8 +157,15 @@
       }
     },
     {
+      "path": "pages/agent/gifts/index",
+      "style": {
+        "navigationBarTitleText": "搭赠情况"
+      }
+    },
+    {
       "path": "pages/super/dashboard/index",
       "style": {
+        "navigationStyle": "custom",
         "navigationBarTitleText": "数据驾驶舱",
         "navigationBarBackgroundColor": "#2563EB",
         "navigationBarTextStyle": "white"
@@ -150,6 +175,12 @@
       "path": "pages/super/orders/index",
       "style": {
         "navigationBarTitleText": "订单列表"
+      }
+    },
+    {
+      "path": "pages/super/orders/quick-order",
+      "style": {
+        "navigationBarTitleText": "极速开单"
       }
     },
     {
@@ -177,9 +208,75 @@
       }
     },
     {
+      "path": "pages/super/payees/detail",
+      "style": {
+        "navigationBarTitleText": "收款账户明细"
+      }
+    },
+    {
       "path": "pages/super/transactions/edit",
       "style": {
         "navigationBarTitleText": "修改交易记录"
+      }
+    },
+    {
+      "path": "pages/super/products/index",
+      "style": {
+        "navigationBarTitleText": "商品管理"
+      }
+    },
+    {
+      "path": "pages/super/products/edit",
+      "style": {
+        "navigationBarTitleText": "编辑商品"
+      }
+    },
+    {
+      "path": "pages/super/orders/detail",
+      "style": {
+        "navigationBarTitleText": "订单详情"
+      }
+    },
+    {
+      "path": "pages/super/orders/list",
+      "style": {
+        "navigationBarTitleText": "订单列表"
+      }
+    },
+    {
+      "path": "pages/super/agents/detail",
+      "style": {
+        "navigationBarTitleText": "代理详情"
+      }
+    },
+    {
+      "path": "pages/super/agents/edit",
+      "style": {
+        "navigationBarTitleText": "添加代理"
+      }
+    },
+    {
+      "path": "pages/super/promotions/index",
+      "style": {
+        "navigationBarTitleText": "促销管理"
+      }
+    },
+    {
+      "path": "pages/super/promotions/edit",
+      "style": {
+        "navigationBarTitleText": "编辑促销活动"
+      }
+    },
+    {
+      "path": "pages/super/product-groups/index",
+      "style": {
+        "navigationBarTitleText": "产品组合"
+      }
+    },
+    {
+      "path": "pages/super/trucks/index",
+      "style": {
+        "navigationBarTitleText": "车型管理"
       }
     }
   ],

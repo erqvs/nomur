@@ -54,6 +54,10 @@ export interface OrderItem {
   quantity: number
   price: number
   weight: number
+  // 组合商品信息（如果该商品是组合商品的一部分）
+  groupId?: string
+  groupName?: string
+  groupQuantity?: number // 组合数量（如果该商品属于组合）
 }
 
 // 赠品项
@@ -61,6 +65,31 @@ export interface GiftItem {
   productId: string
   productName: string
   quantity: number
+}
+
+// 赠品送达状态
+export interface GiftStatus {
+  productId: string
+  productName: string
+  totalQuantity: number
+  deliveredQuantity: number
+  undeliveredQuantity: number
+}
+
+// 组合赠品信息
+export interface GroupGiftInfo {
+  groupId: string
+  groupName: string
+  totalRequirement: number // 组合总要求（箱）
+  deliveredTotal: number // 已送达合计（箱）
+  remainingQuantity: number // 剩余需要送达（箱）
+  isCompleted: boolean // 是否已完成
+  products: Array<{
+    productId: string
+    productName: string
+    quantity: number // 订单中该产品的赠品数量
+    deliveredQuantity: number // 该产品已送达数量
+  }>
 }
 
 // 订单类型
@@ -75,6 +104,8 @@ export interface Order {
   promotionId?: string | string[] // 促销ID（支持多个）
   promotionNames?: string[] // 促销活动名称列表
   giftItems?: GiftItem[]
+  giftStatusList?: GiftStatus[] // 搭赠送达状态列表（单个产品赠品）
+  groupGiftInfo?: GroupGiftInfo // 组合赠品信息
   images: string[] // 订单相关图片
   remark?: string
   createdAt: string
@@ -88,7 +119,7 @@ export interface Transaction {
   type: TransactionType
   reason: TransactionReason
   amount: number // 正数为入账，负数为扣款
-  proof?: string // 凭证图片
+  proof?: string | string[] // 凭证图片（支持单张或多张）
   relatedOrderId?: string
   relatedAgentId?: string // 调货时的关联代理
   remark?: string
@@ -109,6 +140,9 @@ export type TransactionReason =
   | 'transfer_in'   // 调货收入（退款）
   | 'transfer_out'  // 调货支出（扣款）
   | 'marketing'     // 营销送礼退款
+  | 'withdraw'      // 提现
+  | 'fee'           // 手续费
+  | 'other'         // 其他
 
 // 产品组合
 export interface ProductGroup {
@@ -120,14 +154,23 @@ export interface ProductGroup {
   updatedAt: string
 }
 
+// 促销条件详情
+export interface ConditionDetail {
+  type: 'product' | 'group' // 类型：单个产品或组合
+  productId?: string // 产品ID（type为product时）
+  groupId?: string // 组合ID（type为group时）
+  quantity: number // 触发数量
+}
+
 // 促销活动
 export interface Promotion {
   id: string
   name: string
   description: string
-  threshold: number // 满多少件
-  conditionProducts?: string[] // 触发条件的产品ID列表（支持组合，如果为空则所有产品都算）
-  conditionGroupId?: string // 触发条件的组合ID（如果使用组合）
+  threshold: number // 满多少件（向后兼容，取所有条件中的最小值）
+  conditionProducts?: string[] // 触发条件的产品ID列表（向后兼容）
+  conditionGroupId?: string // 触发条件的组合ID（向后兼容）
+  conditionDetails?: ConditionDetail[] // 条件详情：每个条件产品/组合的数量（新字段）
   gifts: GiftItem[] // 赠送商品
   isActive: boolean
   startDate: string
@@ -190,3 +233,19 @@ export interface PaginatedData<T> {
   pagination: Pagination
 }
 
+
+// 搭赠送达记录
+export interface GiftDeliveryRecord {
+  id: string
+  orderId: string
+  agentId: string
+  productId?: string
+  productName?: string
+  groupId?: string
+  groupName?: string
+  quantity: number
+  deliveredBy?: string
+  deliveredByName?: string
+  remark?: string
+  createdAt: string
+}

@@ -27,15 +27,14 @@
         
         <view class="promotion-card__gifts">
           <text class="promotion-card__gifts-label">赠品：</text>
-          <view class="gift-list">
-            <view 
-              v-for="gift in promo.gifts" 
-              :key="gift.productId"
-              class="gift-item"
+          <view class="promotion-card__gifts-list">
+            <text 
+              v-for="(gift, idx) in getDisplayGifts(promo.gifts)" 
+              :key="gift.key"
+              class="promotion-card__gift-item"
             >
-              <text class="gift-item__name">{{ gift.productName }}</text>
-              <text class="gift-item__qty">x{{ gift.quantity }}</text>
-            </view>
+              {{ gift.name }} x{{ gift.quantity }}<text v-if="idx < getDisplayGifts(promo.gifts).length - 1">、</text>
+            </text>
           </view>
         </view>
         
@@ -54,18 +53,18 @@
               <text class="stat-box__label">已获赠品（件）</text>
             </view>
             <view class="stat-box">
-              <text class="stat-box__value">{{ getRemaining(promo.id, promo.threshold) }}</text>
+              <text class="stat-box__value">{{ getRemaining(promo.id, getPromotionThreshold(promo)) }}</text>
               <text class="stat-box__label">距下次（件）</text>
             </view>
           </view>
           <view class="my-progress__bar">
             <view 
               class="my-progress__bar-inner"
-              :style="{ width: getProgress(promo.id, promo.threshold) + '%' }"
+              :style="{ width: getProgress(promo.id, getPromotionThreshold(promo)) + '%' }"
             ></view>
           </view>
           <text class="my-progress__tip">
-            每满{{ promo.threshold }}件可获得赠品，继续加油！
+            每满{{ getPromotionThreshold(promo) }}件可获得赠品，继续加油！
           </text>
         </view>
       </view>
@@ -102,8 +101,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { agentApi } from '@/api'
 
 const store = useAppStore()
 
@@ -115,31 +115,70 @@ const inactivePromotions = computed(() =>
   store.promotions.filter(p => !p.isActive)
 )
 
-// 模拟获取用户在某促销活动中的购买数量
+// 促销活动进度数据
+const promotionProgress = ref<Map<string, { purchased: number; giftsReceived: number }>>(new Map())
+const loadingProgress = ref(false)
+
+// 加载促销活动进度
+const loadPromotionProgress = async () => {
+  if (!store.currentAgentId) return
+  
+  try {
+    loadingProgress.value = true
+    const progressList = await agentApi.getPromotionProgress(store.currentAgentId)
+    const progressMap = new Map()
+    progressList.forEach(item => {
+      progressMap.set(item.promotionId, {
+        purchased: item.purchased,
+        giftsReceived: item.giftsReceived
+      })
+    })
+    promotionProgress.value = progressMap
+  } catch (error) {
+    console.error('加载促销活动进度失败:', error)
+  } finally {
+    loadingProgress.value = false
+  }
+}
+
+onMounted(() => {
+  loadPromotionProgress()
+})
+
+// 获取用户在某促销活动中的购买数量
 const getMyPurchased = (promoId: string) => {
-  // 实际项目中应该从后端获取
-  return 280
+  const progress = promotionProgress.value.get(promoId)
+  return progress?.purchased || 0
 }
 
 // 获取已获得赠品数量
 const getMyGifts = (promoId: string) => {
-  const purchased = getMyPurchased(promoId)
-  const promo = store.promotions.find(p => p.id === promoId)
-  if (!promo) return 0
-  
-  const times = Math.floor(purchased / promo.threshold)
-  return times * promo.gifts.reduce((sum, g) => sum + g.quantity, 0)
+  const progress = promotionProgress.value.get(promoId)
+  return progress?.giftsReceived || 0
+}
+
+// 获取促销活动的阈值（优先使用 conditionDetails 中的 quantity）
+const getPromotionThreshold = (promo: any) => {
+  // 如果有 conditionDetails，使用第一个条件的 quantity
+  if (promo.conditionDetails && Array.isArray(promo.conditionDetails) && promo.conditionDetails.length > 0) {
+    return promo.conditionDetails[0].quantity || promo.threshold
+  }
+  // 否则使用 threshold
+  return promo.threshold
 }
 
 // 获取距离下次赠品还差多少
 const getRemaining = (promoId: string, threshold: number) => {
   const purchased = getMyPurchased(promoId)
-  return threshold - (purchased % threshold)
+  if (threshold <= 0) return 0
+  const remainder = purchased % threshold
+  return remainder === 0 ? threshold : threshold - remainder
 }
 
 // 获取进度百分比
 const getProgress = (promoId: string, threshold: number) => {
   const purchased = getMyPurchased(promoId)
+  if (threshold <= 0) return 0
   return Math.round((purchased % threshold) / threshold * 100)
 }
 
@@ -150,6 +189,55 @@ const formatDate = (dateStr: string | Date) => {
   const month = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+// 获取显示用的赠品列表（合并组合赠品）
+const getDisplayGifts = (gifts: any[]) => {
+  if (!gifts || gifts.length === 0) return []
+  
+  // 检查是否有组合赠品（有 groupId 或 type 字段，且有 productIds 数组）
+  const hasGroupGifts = gifts.some(g => 
+    (g.groupId || g.type) && g.productIds && Array.isArray(g.productIds) && g.productIds.length > 0
+  )
+  
+  if (hasGroupGifts) {
+    // 组合赠品：按 type 或 groupId 分组，合并显示
+    const groupMap = new Map<string, { name: string; quantity: number; key: string }>()
+    
+    gifts.forEach(gift => {
+      if ((gift.groupId || gift.type) && gift.productIds && Array.isArray(gift.productIds) && gift.productIds.length > 0) {
+        // 这是组合赠品
+        const key = gift.groupId || gift.type
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            name: gift.type || gift.groupName || '组合赠品',
+            quantity: gift.quantity || 0,
+            key: key
+          })
+        }
+        // 注意：同一个组合可能有多条记录（旧格式），但 quantity 应该相同，不需要累加
+      } else {
+        // 单个产品赠品
+        const key = gift.productId || gift.productName || ''
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            name: gift.productName || gift.productId || '',
+            quantity: gift.quantity || 0,
+            key: key
+          })
+        }
+      }
+    })
+    
+    return Array.from(groupMap.values())
+  } else {
+    // 没有组合赠品，正常显示每个产品
+    return gifts.map((gift, idx) => ({
+      name: gift.productName || gift.productId || '',
+      quantity: gift.quantity || 0,
+      key: gift.productId || idx.toString()
+    }))
+  }
 }
 </script>
 
@@ -232,40 +320,31 @@ const formatDate = (dateStr: string | Date) => {
   
   &__gifts {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
+    flex-wrap: wrap;
     margin-bottom: 24rpx;
+    gap: 8rpx;
   }
   
   &__gifts-label {
     font-size: 26rpx;
     color: #8d6e63;
-    margin-right: 12rpx;
+    margin-right: 8rpx;
+    flex-shrink: 0;
   }
-}
-
-.gift-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-}
-
-.gift-item {
-  display: flex;
-  align-items: center;
-  padding: 8rpx 16rpx;
-  background: rgba($success-color, 0.15);
-  border-radius: 8rpx;
   
-  &__name {
+  &__gifts-list {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4rpx;
+  }
+  
+  &__gift-item {
     font-size: 26rpx;
     color: $success-color;
-  }
-  
-  &__qty {
-    font-size: 24rpx;
-    color: $success-color;
-    font-weight: 600;
-    margin-left: 8rpx;
+    font-weight: 500;
   }
 }
 

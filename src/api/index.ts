@@ -105,6 +105,35 @@ export const agentApi = {
     totalGiftsReceived: number
   }>('/agents/' + id + '/statistics'),
   
+  // 获取代理商搭赠情况
+  getGifts: (id: string) => request<Array<{
+    productId?: string
+    groupId?: string
+    productName?: string
+    groupName?: string
+    totalQuantity: number
+    deliveredQuantity: number
+    undeliveredQuantity: number
+    isGroup?: boolean
+  }>>('/agents/' + id + '/gifts'),
+  
+  // 获取代理商促销活动进度
+  getPromotionProgress: (id: string) => request<Array<{
+    promotionId: string
+    purchased: number
+    giftsReceived: number
+  }>>('/agents/' + id + '/promotions/progress'),
+  
+  // 更新代理商搭赠数量
+  updateGifts: (id: string, gifts: Array<{
+    productId: string
+    productName: string
+    deliveredQuantity: number
+  }>) => request('/agents/' + id + '/gifts', {
+    method: 'PUT',
+    data: { gifts }
+  }),
+  
   // 删除代理商
   delete: (id: string) => request('/agents/' + id, { method: 'DELETE' })
 }
@@ -113,6 +142,39 @@ export const agentApi = {
 export const driverApi = {
   getAll: () => request<Driver[]>('/drivers'),
   create: (data: Omit<Driver, 'id'>) => request<{ id: string }>('/drivers', { method: 'POST', data })
+}
+
+// ==================== 车型 API ====================
+export interface TruckType {
+  id: string
+  name: string
+  minWeight: number
+  maxWeight: number
+  isDefault: boolean
+}
+
+export const truckApi = {
+  // 获取所有车型
+  getAll: () => request<TruckType[]>('/truck-types'),
+  
+  // 创建车型
+  create: (data: {
+    name: string
+    minWeight: number
+    maxWeight: number
+    isDefault: boolean
+  }) => request<{ id: string }>('/truck-types', { method: 'POST', data }),
+  
+  // 更新车型
+  update: (id: string, data: {
+    name: string
+    minWeight: number
+    maxWeight: number
+    isDefault: boolean
+  }) => request('/truck-types/' + id, { method: 'PUT', data }),
+  
+  // 删除车型
+  delete: (id: string) => request('/truck-types/' + id, { method: 'DELETE' })
 }
 
 // ==================== 促销活动 API ====================
@@ -184,6 +246,44 @@ export const orderApi = {
       'admin-id': adminId,
       'admin-role': adminRole
     }
+  }),
+  
+  // 更新订单状态（管理端可用）
+  updateStatus: (id: string, status: 'pending' | 'shipped' | 'completed') =>
+    request('/orders/' + id + '/status', {
+      method: 'PUT',
+      data: { status }
+    }),
+  
+  // 更新订单搭赠送达状态
+  updateGifts: (id: string, gifts: Array<{
+    productId: string
+    productName: string
+    deliveredQuantity: number
+  }>, remark?: string) => request('/orders/' + id + '/gifts', {
+    method: 'PUT',
+    data: { gifts, remark }
+  }),
+  
+  // 获取订单的搭赠送达记录
+  getGiftDeliveryRecords: (id: string) => request<GiftDeliveryRecord[]>('/orders/' + id + '/gift-delivery-records'),
+  
+  // 删除送达记录（仅管理员）
+  deleteGiftDeliveryRecord: (orderId: string, recordId: string, adminId: string, adminRole: string) => request('/orders/' + orderId + '/gift-delivery-records/' + recordId, {
+    method: 'DELETE',
+    customHeader: {
+      'admin-id': adminId,
+      'admin-role': adminRole
+    }
+  }),
+  
+  // 删除订单（仅超级管理员）
+  delete: (id: string, adminId: string, adminRole: string) => request('/orders/' + id, {
+    method: 'DELETE',
+    customHeader: {
+      'admin-id': adminId,
+      'admin-role': adminRole
+    }
   })
 }
 
@@ -227,16 +327,26 @@ export const transactionApi = {
     remark?: string
   }) => request<{ inTxId: string; outTxId: string }>('/transactions/transfer', { method: 'POST', data }),
   
-  // 修改交易记录（仅超级管理员）
+  // 修改交易记录（管理端可用）
   update: (id: string, data: {
     agentId: string
     amount: number
     reason: TransactionReason
     remark?: string
     paymentAccountId?: string
+    proof?: string | string[]
   }, adminId: string, adminRole: string) => request('/transactions/' + id, {
     method: 'PUT',
     data,
+    customHeader: {
+      'admin-id': adminId,
+      'admin-role': adminRole
+    }
+  }),
+  
+  // 删除交易记录（仅超级管理员）
+  delete: (id: string, adminId: string, adminRole: string) => request('/transactions/' + id, {
+    method: 'DELETE',
     customHeader: {
       'admin-id': adminId,
       'admin-role': adminRole

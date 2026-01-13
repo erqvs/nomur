@@ -32,11 +32,33 @@
     
     <!-- 提示文字 -->
     <view v-if="tip" class="image-uploader__tip">{{ tip }}</view>
+    
+    <!-- 图片预览组件 -->
+    <ImagePreview 
+      :show="showPreview"
+      :urls="modelValue"
+      :current="previewIndex"
+      @close="showPreview = false"
+    />
+    
+    <!-- 图片裁剪组件 -->
+    <ImageCropper
+      :show="showCropper"
+      :imagePath="tempImagePath"
+      :aspectRatio="1"
+      :outputWidth="800"
+      :outputHeight="800"
+      @confirm="handleCropConfirm"
+      @cancel="handleCropCancel"
+    />
   </view>
 </template>
 
 <script setup lang="ts">
-import { uploadImages } from '@/utils/upload'
+import { ref } from 'vue'
+import { uploadImage } from '@/utils/upload'
+import ImagePreview from '@/components/ImagePreview/index.vue'
+import ImageCropper from '@/components/ImageCropper/index.vue'
 
 const props = withDefaults(defineProps<{
   modelValue: string[]
@@ -57,51 +79,69 @@ const emit = defineEmits<{
   (e: 'change', value: string[]): void
 }>()
 
-// 选择图片
+// 裁剪相关
+const showCropper = ref(false)
+const tempImagePath = ref('')
+
+// 选择图片（每次只能选择一张）
 const chooseImage = async () => {
-  const count = props.maxCount 
-    ? props.maxCount - props.modelValue.length 
-    : 9
-    
+  // 检查是否达到最大数量
+  if (props.maxCount && props.modelValue.length >= props.maxCount) {
+    uni.showToast({ title: `最多只能上传${props.maxCount}张图片`, icon: 'none' })
+    return
+  }
+  
   uni.chooseImage({
-    count,
+    count: 1, // 每次只能选择一张
     sizeType: props.sizeType,
     sourceType: props.sourceType,
-    success: async (res) => {
-      try {
-        // 上传图片到服务器
-        const uploadedUrls = await uploadImages(res.tempFilePaths)
-        const newImages = [...props.modelValue, ...uploadedUrls]
-        emit('update:modelValue', newImages)
-        emit('change', newImages)
-      } catch (error: any) {
-        uni.showToast({ title: error.message || '图片上传失败', icon: 'none' })
-      }
+    success: (res) => {
+      // 显示裁剪界面
+      tempImagePath.value = res.tempFilePaths[0]
+      showCropper.value = true
+    },
+    fail: (err) => {
+      console.error('选择图片失败', err)
     }
   })
 }
 
-// 删除图片
+// 裁剪确认
+const handleCropConfirm = async (croppedImagePath: string) => {
+  showCropper.value = false
+  
+  try {
+    // 上传裁剪后的图片到服务器
+    const uploadedUrl = await uploadImage(croppedImagePath)
+    const newImages = [...props.modelValue, uploadedUrl]
+    emit('update:modelValue', newImages)
+    emit('change', newImages)
+    uni.showToast({ title: '上传成功', icon: 'success' })
+  } catch (error: any) {
+    uni.showToast({ title: error.message || '图片上传失败', icon: 'none' })
+  }
+}
+
+// 裁剪取消
+const handleCropCancel = () => {
+  showCropper.value = false
+  tempImagePath.value = ''
+}
+
+// 删除图片（直接删除，无需确认）
 const deleteImage = (index: number) => {
-  uni.showModal({
-    title: '提示',
-    content: '确定删除这张图片吗？',
-    success: (res) => {
-      if (res.confirm) {
-        const newImages = props.modelValue.filter((_, i) => i !== index)
-        emit('update:modelValue', newImages)
-        emit('change', newImages)
-      }
-    }
-  })
+  const newImages = props.modelValue.filter((_, i) => i !== index)
+  emit('update:modelValue', newImages)
+  emit('change', newImages)
 }
 
 // 预览图片
+const showPreview = ref(false)
+const previewIndex = ref(0)
+
 const previewImage = (index: number) => {
-  uni.previewImage({
-    current: props.modelValue[index],
-    urls: props.modelValue
-  })
+  previewIndex.value = index
+  showPreview.value = true
 }
 </script>
 

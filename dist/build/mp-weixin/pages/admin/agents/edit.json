@@ -1,6 +1,0 @@
-{
-  "navigationBarTitleText": "添加代理",
-  "usingComponents": {
-    "quick-input": "../../../components/QuickInput/index"
-  }
-}

@@ -39,6 +39,7 @@ page {
   margin-bottom: 16rpx;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   
   &::before {
     content: '';
@@ -47,6 +48,13 @@ page {
     background: $primary-color;
     border-radius: 3rpx;
     margin-right: $spacing-sm;
+  }
+  
+  .section-note {
+    font-size: $font-size-sm;
+    font-weight: 400;
+    color: $text-secondary;
+    margin-left: 8rpx;
   }
 }
 

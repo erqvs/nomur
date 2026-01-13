@@ -1,8 +1,0 @@
-{
-  "navigationBarTitleText": "极速开单",
-  "usingComponents": {
-    "tag-select": "../../../components/TagSelect/index",
-    "quick-input": "../../../components/QuickInput/index",
-    "image-uploader": "../../../components/ImageUploader/index"
-  }
-}

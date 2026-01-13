@@ -80,7 +80,7 @@ app.get('/api/health', async (req, res) => {
   }
 })
 
-// 权限检查中间件（检查是否为超级管理员）
+// 权限检查中间件（检查是否为管理员或超级管理员）
 const requireSuperAdmin = async (req, res, next) => {
   try {
     const adminId = req.headers['admin-id'] || req.query.adminId
@@ -97,8 +97,9 @@ const requireSuperAdmin = async (req, res, next) => {
     }
     
     const admin = admins[0]
-    if (admin.role !== 'super_admin') {
-      return res.json({ code: 403, message: '权限不足，需要超级管理员权限' })
+    // 允许 admin 和 super_admin 都有权限
+    if (admin.role !== 'super_admin' && admin.role !== 'admin') {
+      return res.json({ code: 403, message: '权限不足，需要管理员权限' })
     }
     
     // 验证角色是否匹配
@@ -427,6 +428,165 @@ app.get('/api/agents', async (req, res) => {
   }
 })
 
+// 获取代理商促销活动进度
+app.get('/api/agents/:id/promotions/progress', async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    // 验证代理商存在
+    const [[agent]] = await pool.query('SELECT id FROM agents WHERE id = ?', [id])
+    if (!agent) {
+      return res.status(404).json({ code: 404, message: '代理商不存在' })
+    }
+    
+    // 获取该代理商的所有订单（不限制promotion_id，因为可能订单创建时没有设置）
+    const ordersResult = await pool.query(`
+      SELECT promotion_id, items FROM orders 
+      WHERE agent_id = ?
+    `, [id])
+    const orders = ordersResult[0]
+    
+    // 获取所有促销活动信息
+    const [promotionsRows] = await pool.query('SELECT id, condition_details, threshold, gifts FROM promotions WHERE is_active = 1')
+    const promotionsMap = new Map()
+    promotionsRows.forEach(row => {
+      promotionsMap.set(row.id, {
+        conditionDetails: parseJsonField(row.condition_details),
+        threshold: row.threshold,
+        gifts: parseJsonField(row.gifts) || []
+      })
+    })
+    
+    // 获取所有产品组合信息（用于组合条件检查）
+    const [groupsRows] = await pool.query('SELECT id, name, product_ids FROM product_groups')
+    const groupsMap = new Map(groupsRows.map(g => [g.id, { name: g.name, productIds: parseJsonField(g.product_ids) || [] }]))
+    
+    // 计算每个促销活动的进度
+    const progressMap = new Map() // promotionId -> { purchased, giftsReceived }
+    
+    orders.forEach(order => {
+      let promotionIds = parseJsonField(order.promotion_id)
+      // 如果 promotion_id 是单个字符串（UUID），转换为数组
+      if (typeof promotionIds === 'string') {
+        promotionIds = [promotionIds]
+      }
+      const orderItems = parseJsonField(order.items)
+      
+      // 如果 promotion_id 为空，设置为空数组（后续会检查所有促销活动）
+      if (!Array.isArray(promotionIds)) {
+        promotionIds = []
+      }
+      
+      if (!Array.isArray(orderItems)) {
+        return
+      }
+      
+      // 计算订单中每个产品的数量
+      const orderProductQuantities = new Map()
+      orderItems.forEach(item => {
+        const productId = item.productId
+        const quantity = Number(item.quantity) || 0
+        if (productId) {
+          orderProductQuantities.set(productId, (orderProductQuantities.get(productId) || 0) + quantity)
+        }
+      })
+      
+      // 处理每个促销活动（如果订单有promotion_id，只处理匹配的；否则检查所有促销活动）
+      const promotionsToCheck = promotionIds.length > 0 
+        ? promotionIds.map(id => ({ id, promotion: promotionsMap.get(id) })).filter(item => item.promotion)
+        : Array.from(promotionsMap.entries()).map(([id, promotion]) => ({ id, promotion }))
+      
+      promotionsToCheck.forEach(({ id: promotionId, promotion }) => {
+        if (!promotion || !promotionId) {
+          return
+        }
+        
+        // 计算满足条件的数量（购买数量）
+        // 注意：这里需要累加所有满足条件的数量，而不是只计算满足次数的数量
+        if (promotion.conditionDetails && Array.isArray(promotion.conditionDetails) && promotion.conditionDetails.length > 0) {
+          // 新格式：使用 conditionDetails
+          // 对于每个条件，计算订单中满足该条件的数量
+          const conditionQuantities = promotion.conditionDetails.map(condition => {
+            if (condition.type === 'product' && condition.productId) {
+              return orderProductQuantities.get(condition.productId) || 0
+            } else if (condition.type === 'group' && condition.groupId) {
+              // 组合模式：计算订单中属于该组合的产品数量
+              const group = groupsMap.get(condition.groupId)
+              if (!group || !Array.isArray(group.productIds) || group.productIds.length === 0) {
+                return 0
+              }
+              const groupQty = group.productIds.reduce((sum, productId) => {
+                return sum + (orderProductQuantities.get(productId) || 0)
+              }, 0)
+              return groupQty
+            }
+            return 0
+          })
+          
+          // 如果所有条件数量都是0，跳过这个促销活动
+          if (conditionQuantities.every(qty => qty === 0)) {
+            return
+          }
+          
+          // 取最小值（满足所有条件的最小值）
+          const purchased = Math.min(...conditionQuantities.filter(qty => qty > 0))
+          
+          // 累加购买数量
+          const existing = progressMap.get(promotionId) || { purchased: 0, giftsReceived: 0 }
+          existing.purchased += purchased
+          progressMap.set(promotionId, existing)
+        } else {
+          // 旧格式：使用threshold，使用订单总数量
+          const totalQty = Array.from(orderProductQuantities.values()).reduce((sum, qty) => sum + qty, 0)
+          if (totalQty > 0) {
+            const existing = progressMap.get(promotionId) || { purchased: 0, giftsReceived: 0 }
+            existing.purchased += totalQty
+            progressMap.set(promotionId, existing)
+          }
+        }
+      })
+    })
+    
+    // 计算已获得赠品数量
+    progressMap.forEach((progress, promotionId) => {
+      const promotion = promotionsMap.get(promotionId)
+      if (!promotion) return
+      
+      // 根据购买数量和阈值计算满足条件的次数
+      let times = 0
+      if (promotion.conditionDetails && Array.isArray(promotion.conditionDetails) && promotion.conditionDetails.length > 0) {
+        // 新格式：使用 conditionDetails 中的 quantity
+        const conditionQuantities = promotion.conditionDetails.map(condition => {
+          return Math.floor(progress.purchased / condition.quantity)
+        })
+        times = Math.min(...conditionQuantities)
+      } else {
+        // 旧格式：使用threshold
+        times = Math.floor(progress.purchased / promotion.threshold)
+      }
+      
+      // 计算已获得赠品数量
+      const giftsReceived = promotion.gifts.reduce((sum, gift) => {
+        return sum + (Number(gift.quantity) || 0) * times
+      }, 0)
+      
+      progress.giftsReceived = giftsReceived
+    })
+    
+    // 转换为数组格式
+    const progressList = Array.from(progressMap.entries()).map(([promotionId, progress]) => ({
+      promotionId,
+      purchased: progress.purchased,
+      giftsReceived: progress.giftsReceived
+    }))
+    
+    res.json({ code: 0, message: 'OK', data: progressList })
+  } catch (error) {
+    console.error('[DEBUG PROMOTIONS] 获取代理商促销活动进度失败:', error)
+    res.status(500).json({ code: 500, message: error.message })
+  }
+})
+
 // 获取单个代理商
 app.get('/api/agents/:id', async (req, res) => {
   try {
@@ -549,6 +709,227 @@ app.put('/api/agents/sort', async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ code: 500, message: error.message })
+  }
+})
+
+// 获取代理商搭赠情况
+app.get('/api/agents/:id/gifts', async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    // 验证代理商存在
+    const [[agent]] = await pool.query('SELECT id FROM agents WHERE id = ?', [id])
+    if (!agent) {
+      return res.status(404).json({ code: 404, message: '代理商不存在' })
+    }
+    
+    // 获取该代理商的所有订单（包含赠品）
+    const [orders] = await pool.query(
+      'SELECT gift_items FROM orders WHERE agent_id = ? AND gift_items IS NOT NULL',
+      [id]
+    )
+    
+    // 获取所有商品信息（用于获取商品名称）
+    const [productsRows] = await pool.query('SELECT id, name FROM products')
+    const productsMap = new Map(productsRows.map(p => [p.id, p.name]))
+    
+    // 获取所有产品组合信息
+    const [groupsRows] = await pool.query('SELECT id, name, product_ids FROM product_groups')
+    const groupsMap = new Map()
+    groupsRows.forEach(g => {
+      const productIds = parseJsonField(g.product_ids) || []
+      groupsMap.set(g.id, { name: g.name, productIds })
+    })
+    
+    // 统计搭赠情况：按productId分组统计
+    const giftStats = new Map() // productId -> {totalQuantity, deliveredQuantity}
+    const groupGiftStats = new Map() // groupId -> {totalQuantity, deliveredQuantity}
+    
+    orders.forEach(order => {
+      const giftItems = parseJsonField(order.gift_items) || []
+      
+      giftItems.forEach(gift => {
+        // 处理组合赠品
+        if (gift.isGroup && gift.groupId) {
+          const groupId = gift.groupId
+          const quantity = Number(gift.quantity) || 0
+          const deliveredQuantity = Number(gift.deliveredQuantity) || 0
+          
+          if (!groupGiftStats.has(groupId)) {
+            const group = groupsMap.get(groupId)
+            groupGiftStats.set(groupId, {
+              groupId,
+              groupName: group?.name || '组合赠品',
+              productIds: group?.productIds || [],
+              totalQuantity: 0,
+              deliveredQuantity: 0
+            })
+          }
+          
+          const stat = groupGiftStats.get(groupId)
+          stat.totalQuantity += quantity
+          stat.deliveredQuantity += deliveredQuantity
+        } else if (gift.productId) {
+          // 处理单个产品赠品
+          const productId = gift.productId
+          const quantity = Number(gift.quantity) || 0
+          const deliveredQuantity = Number(gift.deliveredQuantity) || 0
+          
+          if (!giftStats.has(productId)) {
+            giftStats.set(productId, {
+              productId,
+              productName: productsMap.get(productId) || productId,
+              totalQuantity: 0,
+              deliveredQuantity: 0
+            })
+          }
+          
+          const stat = giftStats.get(productId)
+          stat.totalQuantity += quantity
+          stat.deliveredQuantity += deliveredQuantity
+        }
+      })
+    })
+    
+    // 构建返回数据
+    const result = []
+    
+    // 添加组合赠品
+    groupGiftStats.forEach((stat, groupId) => {
+      result.push({
+        groupId,
+        groupName: stat.groupName,
+        productIds: stat.productIds,
+        totalQuantity: stat.totalQuantity,
+        deliveredQuantity: stat.deliveredQuantity,
+        undeliveredQuantity: stat.totalQuantity - stat.deliveredQuantity,
+        isGroup: true
+      })
+    })
+    
+    // 添加单个产品赠品
+    giftStats.forEach((stat, productId) => {
+      result.push({
+        productId,
+        productName: stat.productName,
+        totalQuantity: stat.totalQuantity,
+        deliveredQuantity: stat.deliveredQuantity,
+        undeliveredQuantity: stat.totalQuantity - stat.deliveredQuantity,
+        isGroup: false
+      })
+    })
+    
+    res.json({ code: 0, message: 'OK', data: result })
+  } catch (error) {
+    res.status(500).json({ code: 500, message: error.message })
+  }
+})
+
+// 更新代理商搭赠数量
+app.put('/api/agents/:id/gifts', async (req, res) => {
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    
+    const { id } = req.params
+    const { gifts } = req.body
+    
+    if (!Array.isArray(gifts)) {
+      await conn.rollback()
+      return res.json({ code: 400, message: '搭赠信息格式错误' })
+    }
+    
+    // 验证代理商存在
+    const [[agent]] = await conn.query('SELECT id FROM agents WHERE id = ?', [id])
+    if (!agent) {
+      await conn.rollback()
+      return res.status(404).json({ code: 404, message: '代理商不存在' })
+    }
+    
+    // 获取该代理商的所有订单（包含赠品）
+    const [orders] = await conn.query(
+      'SELECT id, gift_items FROM orders WHERE agent_id = ? AND gift_items IS NOT NULL ORDER BY created_at ASC',
+      [id]
+    )
+    
+    // 构建更新映射：productId/groupId -> { targetDelivered, totalQuantity }
+    const updateMap = new Map()
+    gifts.forEach(gift => {
+      if (gift.isGroup && gift.groupId) {
+        updateMap.set(`group:${gift.groupId}`, { 
+          targetDelivered: gift.deliveredQuantity || 0,
+          totalQuantity: 0,
+          allocatedDelivered: 0
+        })
+      } else if (gift.productId) {
+        updateMap.set(`product:${gift.productId}`, { 
+          targetDelivered: gift.deliveredQuantity || 0,
+          totalQuantity: 0,
+          allocatedDelivered: 0
+        })
+      }
+    })
+    
+    // 第一遍：统计每个赠品类型的总数量
+    orders.forEach(order => {
+      const giftItems = parseJsonField(order.gift_items) || []
+      giftItems.forEach(gift => {
+        let key = null
+        if (gift.isGroup && gift.groupId) {
+          key = `group:${gift.groupId}`
+        } else if (gift.productId) {
+          key = `product:${gift.productId}`
+        }
+        
+        if (key && updateMap.has(key)) {
+          const stats = updateMap.get(key)
+          stats.totalQuantity += Number(gift.quantity) || 0
+        }
+      })
+    })
+    
+    // 第二遍：按顺序分配送达数量到各订单
+    for (const order of orders) {
+      const giftItems = parseJsonField(order.gift_items) || []
+      let updated = false
+      
+      giftItems.forEach(gift => {
+        let key = null
+        if (gift.isGroup && gift.groupId) {
+          key = `group:${gift.groupId}`
+        } else if (gift.productId) {
+          key = `product:${gift.productId}`
+        }
+        
+        if (key && updateMap.has(key)) {
+          const stats = updateMap.get(key)
+          const giftQuantity = Number(gift.quantity) || 0
+          const remainingToAllocate = stats.targetDelivered - stats.allocatedDelivered
+          
+          // 分配给这个订单的送达数量：最多是这个订单的赠品数量，不超过剩余需分配数量
+          const allocateToThis = Math.min(giftQuantity, Math.max(0, remainingToAllocate))
+          
+          gift.deliveredQuantity = allocateToThis
+          stats.allocatedDelivered += allocateToThis
+          updated = true
+        }
+      })
+      
+      if (updated) {
+        await conn.query(
+          'UPDATE orders SET gift_items = ? WHERE id = ?',
+          [JSON.stringify(giftItems), order.id]
+        )
+      }
+    }
+    
+    await conn.commit()
+    res.json({ code: 0, message: '搭赠数量更新成功' })
+  } catch (error) {
+    await conn.rollback()
+    res.status(500).json({ code: 500, message: error.message })
+  } finally {
+    conn.release()
   }
 })
 
@@ -966,6 +1347,347 @@ app.put('/api/orders/:id', requireSuperAdmin, async (req, res) => {
   }
 })
 
+// 更新订单状态
+app.put('/api/orders/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { status } = req.body
+    
+    if (!status || !['pending', 'shipped', 'completed'].includes(status)) {
+      return res.json({ code: 400, message: '订单状态无效' })
+    }
+    
+    // 获取订单信息
+    const [[order]] = await pool.query('SELECT * FROM orders WHERE id = ?', [id])
+    if (!order) {
+      return res.status(404).json({ code: 404, message: '订单不存在' })
+    }
+    
+    // 更新订单状态和时间戳
+    const updateFields = ['status = ?']
+    const updateValues = [status]
+    
+    if (status === 'shipped' && order.status === 'pending') {
+      updateFields.push('shipped_at = NOW()')
+    }
+    
+    if (status === 'completed' && order.status !== 'completed') {
+      if (!order.shipped_at) {
+        updateFields.push('shipped_at = NOW()')
+      }
+      updateFields.push('completed_at = NOW()')
+    }
+    
+    updateValues.push(id)
+    
+    await pool.query(
+      `UPDATE orders SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateValues
+    )
+    
+    res.json({ code: 0, message: '订单状态更新成功' })
+  } catch (error) {
+    res.status(500).json({ code: 500, message: error.message })
+  }
+})
+
+// 更新订单搭赠送达状态
+app.put('/api/orders/:id/gifts', async (req, res) => {
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    
+    const { id } = req.params
+    const { gifts, remark } = req.body
+    
+    if (!Array.isArray(gifts)) {
+      return res.json({ code: 400, message: '搭赠信息格式错误' })
+    }
+    
+    // 获取订单信息
+    const [[order]] = await conn.query('SELECT * FROM orders WHERE id = ?', [id])
+    if (!order) {
+      await conn.rollback()
+      return res.status(404).json({ code: 404, message: '订单不存在' })
+    }
+    
+    // 获取管理员信息（如果有）
+    let adminId = null
+    let adminName = null
+    const adminIdHeader = req.headers['admin-id']
+    const adminRoleHeader = req.headers['admin-role']
+    if (adminIdHeader && adminRoleHeader) {
+      const [admins] = await conn.query('SELECT * FROM admins WHERE id = ? AND is_active = 1', [adminIdHeader])
+      if (admins.length > 0) {
+        adminId = admins[0].id
+        adminName = admins[0].name
+      }
+    }
+    
+    // 获取原有赠品信息
+    let giftItems = parseJsonField(order.gift_items) || []
+    
+    // 检查是否是组合赠品（通过检查 giftItems 中是否有 isGroup 或 groupId）
+    const hasGroupGift = giftItems.some(g => g.isGroup === true || g.groupId)
+    
+    // 更新赠品的送达数量，并记录送达历史
+    for (const gift of gifts) {
+      // 查找匹配的赠品：支持 productId 和 groupId 两种匹配方式
+      let giftItem = null
+      if (gift.productId) {
+        // 单个产品赠品：通过 productId 匹配
+        giftItem = giftItems.find(g => g.productId === gift.productId)
+        // 如果没找到，可能是组合赠品（前端发送的 productId 实际上是 groupId）
+        if (!giftItem) {
+          giftItem = giftItems.find(g => g.groupId === gift.productId)
+        }
+      } else if (gift.groupId) {
+        // 组合赠品：通过 groupId 匹配
+        giftItem = giftItems.find(g => g.groupId === gift.groupId || (g.isGroup && g.groupId === gift.groupId))
+      }
+      
+      if (giftItem) {
+        console.log('找到匹配的赠品项:', { 
+          giftId: gift.productId || gift.groupId, 
+          giftItem: { 
+            productId: giftItem.productId, 
+            groupId: giftItem.groupId, 
+            isGroup: giftItem.isGroup 
+          } 
+        })
+        const oldDeliveredQuantity = giftItem.deliveredQuantity || 0
+        const newDeliveredQuantity = gift.deliveredQuantity || 0
+        const quantityDelta = newDeliveredQuantity - oldDeliveredQuantity
+        
+        // 如果送达数量有变化，记录送达历史
+        if (quantityDelta !== 0) {
+          giftItem.deliveredQuantity = newDeliveredQuantity
+          
+          // 创建送达记录
+          const recordId = uuidv4()
+          const isGroup = giftItem.isGroup === true || giftItem.groupId || hasGroupGift
+          
+          // 如果是组合赠品，需要获取组合信息
+          let groupId = null
+          let groupName = null
+          if (isGroup) {
+            // 从 giftItem 中获取组合信息
+            groupId = giftItem.groupId || null
+            groupName = giftItem.groupName || '组合赠品'
+            
+            // 如果没有 groupId，尝试从订单的 groupGiftInfo 中获取
+            if (!groupId && order.group_gift_info) {
+              const groupGiftInfo = parseJsonField(order.group_gift_info)
+              if (groupGiftInfo) {
+                groupId = groupGiftInfo.groupId || null
+                groupName = groupGiftInfo.groupName || '组合赠品'
+              }
+            }
+          }
+          
+          await conn.query(
+            `INSERT INTO gift_delivery_records 
+             (id, order_id, agent_id, product_id, product_name, group_id, group_name, quantity, delivered_by, delivered_by_name, remark) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              recordId,
+              id,
+              order.agent_id,
+              isGroup ? null : gift.productId,
+              isGroup ? null : (giftItem.productName || gift.productName),
+              groupId,
+              groupName,
+              Math.abs(quantityDelta), // 记录变化的绝对值
+              adminId,
+              adminName,
+              remark || null
+            ]
+          )
+        }
+      } else {
+        console.error('未找到匹配的赠品项:', { 
+          gift, 
+          giftItems: giftItems.map(g => ({ 
+            productId: g.productId, 
+            groupId: g.groupId, 
+            isGroup: g.isGroup 
+          })) 
+        })
+        await conn.rollback()
+        return res.status(400).json({ code: 400, message: `未找到匹配的赠品项: ${gift.productId || gift.groupId || '未知'}` })
+      }
+    }
+    
+    // 更新订单的赠品信息
+    await conn.query(
+      'UPDATE orders SET gift_items = ? WHERE id = ?',
+      [JSON.stringify(giftItems), id]
+    )
+    
+    await conn.commit()
+    res.json({ code: 0, message: '搭赠送达状态更新成功' })
+  } catch (error) {
+    await conn.rollback()
+    res.status(500).json({ code: 500, message: error.message })
+  } finally {
+    conn.release()
+  }
+})
+
+// 获取订单的搭赠送达记录
+app.get('/api/orders/:id/gift-delivery-records', async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    // 验证订单是否存在
+    const [[order]] = await pool.query('SELECT * FROM orders WHERE id = ?', [id])
+    if (!order) {
+      return res.status(404).json({ code: 404, message: '订单不存在' })
+    }
+    
+    // 查询送达记录
+    const [records] = await pool.query(
+      `SELECT * FROM gift_delivery_records 
+       WHERE order_id = ? 
+       ORDER BY created_at DESC`,
+      [id]
+    )
+    
+    // 转换字段名为驼峰格式
+    const formattedRecords = records.map(record => ({
+      id: record.id,
+      orderId: record.order_id,
+      agentId: record.agent_id,
+      productId: record.product_id || undefined,
+      productName: record.product_name || undefined,
+      groupId: record.group_id || undefined,
+      groupName: record.group_name || undefined,
+      quantity: record.quantity,
+      deliveredBy: record.delivered_by || undefined,
+      deliveredByName: record.delivered_by_name || undefined,
+      remark: record.remark || undefined,
+      createdAt: record.created_at
+    }))
+    
+    res.json({ code: 0, message: 'OK', data: formattedRecords })
+  } catch (error) {
+    res.status(500).json({ code: 500, message: error.message })
+  }
+})
+
+// 删除送达记录（仅管理员）
+app.delete('/api/orders/:orderId/gift-delivery-records/:recordId', requireSuperAdmin, async (req, res) => {
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    
+    const { orderId, recordId } = req.params
+    const adminId = req.headers['admin-id'] || req.query.adminId
+    const adminRole = req.headers['admin-role'] || req.query.adminRole
+    
+    // 验证管理员权限（admin 或 super_admin）
+    if (adminRole !== 'admin' && adminRole !== 'super_admin') {
+      await conn.rollback()
+      return res.status(403).json({ code: 403, message: '无权限删除送达记录' })
+    }
+    
+    // 验证订单是否存在
+    const [[order]] = await conn.query('SELECT * FROM orders WHERE id = ?', [orderId])
+    if (!order) {
+      await conn.rollback()
+      return res.status(404).json({ code: 404, message: '订单不存在' })
+    }
+    
+    // 验证送达记录是否存在
+    const [[record]] = await conn.query(
+      'SELECT * FROM gift_delivery_records WHERE id = ? AND order_id = ?',
+      [recordId, orderId]
+    )
+    if (!record) {
+      await conn.rollback()
+      return res.status(404).json({ code: 404, message: '送达记录不存在' })
+    }
+    
+    // 删除送达记录
+    await conn.query('DELETE FROM gift_delivery_records WHERE id = ?', [recordId])
+    
+    // 更新订单中的送达数量（减少对应的数量）
+    const giftItems = parseJsonField(order.gift_items) || []
+    let updated = false
+    
+    if (record.group_id) {
+      // 组合赠品
+      const giftItem = giftItems.find(g => g.groupId === record.group_id)
+      if (giftItem && giftItem.deliveredQuantity) {
+        giftItem.deliveredQuantity = Math.max(0, (giftItem.deliveredQuantity || 0) - record.quantity)
+        updated = true
+      }
+    } else if (record.product_id) {
+      // 单个产品赠品
+      const giftItem = giftItems.find(g => g.productId === record.product_id)
+      if (giftItem && giftItem.deliveredQuantity) {
+        giftItem.deliveredQuantity = Math.max(0, (giftItem.deliveredQuantity || 0) - record.quantity)
+        updated = true
+      }
+    }
+    
+    if (updated) {
+      await conn.query(
+        'UPDATE orders SET gift_items = ? WHERE id = ?',
+        [JSON.stringify(giftItems), orderId]
+      )
+    }
+    
+    await conn.commit()
+    res.json({ code: 0, message: '删除成功' })
+  } catch (error) {
+    await conn.rollback()
+    res.status(500).json({ code: 500, message: error.message })
+  } finally {
+    conn.release()
+  }
+})
+
+// 删除订单（仅超级管理员）
+app.delete('/api/orders/:id', requireSuperAdmin, async (req, res) => {
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    
+    const { id } = req.params
+    
+    // 获取订单信息
+    const [[order]] = await conn.query('SELECT * FROM orders WHERE id = ?', [id])
+    if (!order) {
+      await conn.rollback()
+      return res.status(404).json({ code: 404, message: '订单不存在' })
+    }
+    
+    // 如果订单已发货（status为shipped或completed），需要退回代理商余额
+    if (order.status === 'shipped' || order.status === 'completed') {
+      const amount = Number(order.total_amount) || 0
+      if (amount > 0) {
+        // 退回代理商余额
+        await conn.query('UPDATE agents SET balance = balance + ? WHERE id = ?', [amount, order.agent_id])
+      }
+    }
+    
+    // 删除关联的交易记录（如果有）
+    await conn.query('DELETE FROM transactions WHERE related_order_id = ?', [id])
+    
+    // 删除订单
+    await conn.query('DELETE FROM orders WHERE id = ?', [id])
+    
+    await conn.commit()
+    res.json({ code: 0, message: '订单删除成功' })
+  } catch (error) {
+    await conn.rollback()
+    res.status(500).json({ code: 500, message: error.message })
+  } finally {
+    conn.release()
+  }
+})
+
 // ==================== 产品组合 API ====================
 // 获取所有产品组合
 app.get('/api/product-groups', async (req, res) => {
@@ -998,6 +1720,31 @@ app.post('/api/product-groups', async (req, res) => {
       return res.json({ code: 400, message: '请至少选择一个产品' })
     }
     
+    // 验证所有产品的重量是否相同
+    if (productIds.length > 1) {
+      const placeholders = productIds.map(() => '?').join(',')
+      const [productRows] = await pool.query(
+        `SELECT id, name, weight FROM products WHERE id IN (${placeholders})`,
+        productIds
+      )
+      
+      if (productRows.length !== productIds.length) {
+        return res.json({ code: 400, message: '部分产品不存在' })
+      }
+      
+      // 检查所有产品的重量是否相同
+      const firstWeight = productRows[0].weight
+      const allSameWeight = productRows.every(product => product.weight === firstWeight)
+      
+      if (!allSameWeight) {
+        const weightList = productRows.map(p => `${p.name}(${p.weight}kg)`).join('、')
+        return res.json({ 
+          code: 400, 
+          message: `组合中的产品重量必须相同。当前产品重量：${weightList}` 
+        })
+      }
+    }
+    
     const id = uuidv4()
     await pool.query(
       'INSERT INTO product_groups (id, name, description, product_ids) VALUES (?, ?, ?, ?)',
@@ -1021,6 +1768,31 @@ app.put('/api/product-groups/:id', async (req, res) => {
     
     if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
       return res.json({ code: 400, message: '请至少选择一个产品' })
+    }
+    
+    // 验证所有产品的重量是否相同
+    if (productIds.length > 1) {
+      const placeholders = productIds.map(() => '?').join(',')
+      const [productRows] = await pool.query(
+        `SELECT id, name, weight FROM products WHERE id IN (${placeholders})`,
+        productIds
+      )
+      
+      if (productRows.length !== productIds.length) {
+        return res.json({ code: 400, message: '部分产品不存在' })
+      }
+      
+      // 检查所有产品的重量是否相同
+      const firstWeight = productRows[0].weight
+      const allSameWeight = productRows.every(product => product.weight === firstWeight)
+      
+      if (!allSameWeight) {
+        const weightList = productRows.map(p => `${p.name}(${p.weight}kg)`).join('、')
+        return res.json({ 
+          code: 400, 
+          message: `组合中的产品重量必须相同。当前产品重量：${weightList}` 
+        })
+      }
     }
     
     await pool.query(
@@ -1111,10 +1883,31 @@ app.get('/api/transactions', async (req, res) => {
         try {
           const items = typeof orderRow.items === 'string' ? JSON.parse(orderRow.items) : orderRow.items
           if (Array.isArray(items)) {
-            orderItemsMap.set(orderRow.id, items.map(item => ({
-              productName: item.productName || item.product_name,
-              quantity: Number(item.quantity) || 0
-            })))
+            // 处理组合商品：按组合分组显示
+            const displayMap = new Map()
+            
+            items.forEach(item => {
+              if (item.groupId && item.groupName && item.groupQuantity) {
+                // 组合商品：按groupId分组，只显示一次组合名称和组合数量
+                const key = `group-${item.groupId}`
+                if (!displayMap.has(key)) {
+                  displayMap.set(key, {
+                    productName: item.groupName,
+                    quantity: item.groupQuantity,
+                    groupId: item.groupId
+                  })
+                }
+              } else {
+                // 单个商品：正常显示
+                const key = `product-${item.productId}`
+                displayMap.set(key, {
+                  productName: item.productName || item.product_name,
+                  quantity: Number(item.quantity) || 0
+                })
+              }
+            })
+            
+            orderItemsMap.set(orderRow.id, Array.from(displayMap.values()))
           }
         } catch (e) {
           console.error('解析订单商品失败:', e)
@@ -1124,6 +1917,17 @@ app.get('/api/transactions', async (req, res) => {
     
     const transactions = rows.map(row => {
       const orderItems = row.related_order_id ? orderItemsMap.get(row.related_order_id) : undefined
+      // 处理凭证图片：支持字符串或JSON字符串（多图情况）
+      let proofValue = row.proof
+      if (row.proof && typeof row.proof === 'string') {
+        try {
+          const parsed = JSON.parse(row.proof)
+          proofValue = parsed // 如果是JSON数组，使用解析后的数组；如果是单个字符串，保持原值
+        } catch {
+          // 不是JSON字符串，保持原字符串值
+          proofValue = row.proof
+        }
+      }
       return {
         id: row.id,
         agentId: row.agent_id,
@@ -1131,7 +1935,7 @@ app.get('/api/transactions', async (req, res) => {
         type: row.type,
         reason: row.reason,
         amount: Number(row.amount),
-        proof: row.proof,
+        proof: proofValue,
         relatedOrderId: row.related_order_id,
         relatedAgentId: row.related_agent_id,
         productId: row.product_id,
@@ -1302,7 +2106,7 @@ app.put('/api/transactions/:id', requireSuperAdmin, async (req, res) => {
     await conn.beginTransaction()
     
     const { id } = req.params
-    const { agentId, amount, reason, remark, paymentAccountId } = req.body
+    const { agentId, amount, reason, remark, paymentAccountId, proof } = req.body
     
     // 获取原交易记录
     const [[originalTx]] = await conn.query('SELECT * FROM transactions WHERE id = ?', [id])
@@ -1314,32 +2118,113 @@ app.put('/api/transactions/:id', requireSuperAdmin, async (req, res) => {
     // 计算金额差异
     const amountDiff = amount - originalTx.amount
     
+    // 处理凭证图片（支持字符串或数组）
+    let proofValue = null
+    if (proof) {
+      if (Array.isArray(proof)) {
+        proofValue = JSON.stringify(proof)
+      } else if (typeof proof === 'string') {
+        proofValue = proof
+      }
+    }
+    
+    // 判断是否是收款账户扣费（有 paymentAccountId 且没有 agentId，或者 reason 是 withdraw/fee/other）
+    const isPaymentAccountDeduct = paymentAccountId && !agentId || 
+                                    ['withdraw', 'fee', 'other'].includes(reason)
+    
+    // 对于收款账户扣费，保持原 agent_id（如果原来有的话），或者使用第一个代理商作为占位符
+    let finalAgentId = agentId
+    if (isPaymentAccountDeduct && !agentId) {
+      // 收款账户扣费：保持原 agent_id（如果原来有），否则使用第一个代理商作为占位符
+      if (originalTx.agent_id) {
+        finalAgentId = originalTx.agent_id
+      } else {
+        // 如果没有原 agent_id，使用第一个代理商作为占位符（数据库要求 NOT NULL）
+        const [firstAgent] = await conn.query('SELECT id FROM agents LIMIT 1')
+        if (firstAgent.length > 0) {
+          finalAgentId = firstAgent[0].id
+        } else {
+          await conn.rollback()
+          return res.json({ code: 400, message: '系统中没有代理商，无法创建交易记录' })
+        }
+      }
+    }
+    
     // 更新交易记录
     await conn.query(
-      'UPDATE transactions SET agent_id = ?, amount = ?, reason = ?, remark = ?, payment_account_id = ? WHERE id = ?',
-      [agentId, amount, reason, remark, paymentAccountId || null, id]
+      'UPDATE transactions SET agent_id = ?, amount = ?, reason = ?, remark = ?, payment_account_id = ?, proof = ? WHERE id = ?',
+      [finalAgentId, amount, reason, remark, paymentAccountId || null, proofValue, id]
     )
     
-    // 如果金额或代理商发生变化，需要调整余额
-    if (amountDiff !== 0 || originalTx.agent_id !== agentId) {
-      // 恢复原代理商的余额
-      if (originalTx.type === 'recharge') {
-        await conn.query('UPDATE agents SET balance = balance - ? WHERE id = ?', [originalTx.amount, originalTx.agent_id])
-      } else {
-        await conn.query('UPDATE agents SET balance = balance + ? WHERE id = ?', [Math.abs(originalTx.amount), originalTx.agent_id])
+    // 如果金额或代理商发生变化，需要调整余额（仅非收款账户扣费时）
+    if (!isPaymentAccountDeduct && (amountDiff !== 0 || originalTx.agent_id !== finalAgentId)) {
+      // 恢复原代理商的余额（如果原交易有代理商）
+      if (originalTx.agent_id) {
+        if (originalTx.type === 'recharge') {
+          await conn.query('UPDATE agents SET balance = balance - ? WHERE id = ?', [originalTx.amount, originalTx.agent_id])
+        } else {
+          await conn.query('UPDATE agents SET balance = balance + ? WHERE id = ?', [Math.abs(originalTx.amount), originalTx.agent_id])
+        }
       }
       
       // 更新新代理商的余额
-      const newType = amount > 0 ? 'recharge' : 'deduct'
-      if (newType === 'recharge') {
-        await conn.query('UPDATE agents SET balance = balance + ? WHERE id = ?', [amount, agentId])
-      } else {
-        await conn.query('UPDATE agents SET balance = balance - ? WHERE id = ?', [Math.abs(amount), agentId])
+      if (finalAgentId) {
+        const newType = amount > 0 ? 'recharge' : 'deduct'
+        if (newType === 'recharge') {
+          await conn.query('UPDATE agents SET balance = balance + ? WHERE id = ?', [amount, finalAgentId])
+        } else {
+          await conn.query('UPDATE agents SET balance = balance - ? WHERE id = ?', [Math.abs(amount), finalAgentId])
+        }
       }
     }
     
     await conn.commit()
     res.json({ code: 0, message: '交易记录修改成功' })
+  } catch (error) {
+    await conn.rollback()
+    res.status(500).json({ code: 500, message: error.message })
+  } finally {
+    conn.release()
+  }
+})
+
+// 删除交易记录（仅超级管理员）
+app.delete('/api/transactions/:id', requireSuperAdmin, async (req, res) => {
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    
+    const { id } = req.params
+    
+    // 获取原交易记录
+    const [[originalTx]] = await conn.query('SELECT * FROM transactions WHERE id = ?', [id])
+    if (!originalTx) {
+      await conn.rollback()
+      return res.status(404).json({ code: 404, message: '交易记录不存在' })
+    }
+    
+    // 检查是否为订单相关的交易记录（发货扣款），如果是，不允许删除
+    if (originalTx.related_order_id) {
+      await conn.rollback()
+      return res.status(400).json({ code: 400, message: '订单相关的交易记录不能删除，请先删除订单' })
+    }
+    
+    // 恢复代理商余额
+    // 充值类型的交易：删除时需要扣除余额
+    // 扣款类型的交易：删除时需要退回余额
+    if (originalTx.type === 'recharge') {
+      // 充值 -> 删除时扣除余额
+      await conn.query('UPDATE agents SET balance = balance - ? WHERE id = ?', [originalTx.amount, originalTx.agent_id])
+    } else {
+      // 扣款 -> 删除时退回余额
+      await conn.query('UPDATE agents SET balance = balance + ? WHERE id = ?', [Math.abs(originalTx.amount), originalTx.agent_id])
+    }
+    
+    // 删除交易记录
+    await conn.query('DELETE FROM transactions WHERE id = ?', [id])
+    
+    await conn.commit()
+    res.json({ code: 0, message: '交易记录删除成功' })
   } catch (error) {
     await conn.rollback()
     res.status(500).json({ code: 500, message: error.message })
@@ -1768,12 +2653,13 @@ app.get('/api/agents/:id/statistics', async (req, res) => {
       WHERE agent_id = ? AND YEAR(sale_date) = YEAR(CURDATE())
     `, [id])
     
-    // 按商品ID统计完成量（排除赠品）
+    // 按商品ID统计完成量（排除赠品/搭赠）
+    // 重要：搭赠（gift_items）不计入任务进度，只统计正常购买的商品（items）
     const completedByProduct = {}
-    let totalGifts = 0
+    let totalGifts = 0 // 赠品总数，仅用于统计展示，不影响任务进度计算
     
     orders.forEach(order => {
-      // 统计正常购买（不含赠品）
+      // 统计正常购买的商品（不含赠品/搭赠）- 这些会计入任务进度
       const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items
       if (Array.isArray(items)) {
         items.forEach(item => {
@@ -1785,12 +2671,14 @@ app.get('/api/agents/:id/statistics', async (req, res) => {
         })
       }
       
-      // 统计赠品数量
+      // 统计赠品数量（仅用于展示，不计入任务进度）
+      // 注意：gift_items 中的商品不会添加到 completedByProduct，因此不会影响任务完成量
       const giftItems = order.gift_items ? 
         (typeof order.gift_items === 'string' ? JSON.parse(order.gift_items) : order.gift_items) : []
       if (Array.isArray(giftItems)) {
         giftItems.forEach(gift => {
           totalGifts += Number(gift.quantity) || 0
+          // 这里只累加 totalGifts，不会添加到 completedByProduct，确保搭赠不计入任务
         })
       }
     })
@@ -1826,13 +2714,9 @@ app.get('/api/agents/:id/statistics', async (req, res) => {
       if ((key.startsWith('_group_') || key.startsWith('group_')) && typeof targetValue === 'object' && targetValue !== null && !Array.isArray(targetValue)) {
         const group = targetValue
         if (group.products && Array.isArray(group.products) && typeof group.target === 'number') {
-          // 组合目标：计算所有产品的总完成量
+          // 组合目标：计算所有产品的总完成量（合计，不使用processedProducts限制）
           const groupCompleted = group.products.reduce((sum, productId) => {
-            if (!processedProducts.has(productId)) {
-              processedProducts.add(productId)
-              return sum + (completedByProduct[productId] || 0)
-            }
-            return sum
+            return sum + (completedByProduct[productId] || 0)
           }, 0)
           
           const groupTarget = group.target
@@ -1969,6 +2853,7 @@ app.get('/api/payment-accounts/:id/balance-details', async (req, res) => {
         t.reason,
         t.amount,
         t.remark,
+        t.proof,
         t.created_at,
         a.name as agent_name,
         a.id as agent_id
@@ -1993,16 +2878,31 @@ app.get('/api/payment-accounts/:id/balance-details', async (req, res) => {
           name: account.name,
           balance: balance
         },
-        transactions: transactions.map(tx => ({
-          id: tx.id,
-          type: tx.type,
-          reason: tx.reason,
-          amount: Number(tx.amount),
-          remark: tx.remark,
-          agentId: tx.agent_id,
-          agentName: tx.agent_name,
-          createdAt: tx.created_at
-        }))
+        transactions: transactions.map(tx => {
+          // 处理凭证图片：支持字符串或JSON字符串（多图情况）
+          let proofValue = tx.proof
+          if (tx.proof && typeof tx.proof === 'string') {
+            try {
+              const parsed = JSON.parse(tx.proof)
+              proofValue = parsed // 如果是JSON数组，使用解析后的数组；如果是单个字符串，保持原值
+            } catch {
+              // 不是JSON字符串，保持原字符串值
+              proofValue = tx.proof
+            }
+          }
+          
+          return {
+            id: tx.id,
+            type: tx.type,
+            reason: tx.reason,
+            amount: Number(tx.amount),
+            remark: tx.remark,
+            proof: proofValue,
+            agentId: tx.agent_id,
+            agentName: tx.agent_name,
+            createdAt: tx.created_at
+          }
+        })
       }
     })
   } catch (error) {

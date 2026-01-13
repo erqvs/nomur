@@ -104,14 +104,20 @@ const selectRole = async (role: 'super' | 'admin' | 'agent') => {
     // 设置超级管理员信息（实际应该从登录流程获取）
     // 这里需要从登录API获取管理员信息
     store.setCurrentAdmin({
-      id: 'super-admin-id', // 实际应该从登录API获取
+      id: 'admin1', // 使用数据库中的超级管理员ID
       name: '超级管理员',
       role: 'super_admin'
     })
     uni.reLaunch({ url: '/pages/super/dashboard/index' })
   } else if (role === 'admin') {
     store.switchRole('admin')
-    store.setCurrentAdmin(null)
+    // 设置默认管理端管理员信息（管理端不需要登录验证，使用默认管理员）
+    // 注意：这里使用一个默认的管理员ID，后端会验证该ID是否存在
+    store.setCurrentAdmin({
+      id: 'admin2', // 使用数据库中的默认管理员ID（张总）
+      name: '管理端',
+      role: 'admin'
+    })
     uni.switchTab({ url: '/pages/admin/dashboard/index' })
   } else {
     // 代理端需要选择代理商

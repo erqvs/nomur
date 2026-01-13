@@ -10,8 +10,13 @@
       >
         <view class="order-card__header">
           <text class="order-card__id">订单号：{{ order.id.slice(-8).toUpperCase() }}</text>
-          <view class="order-card__edit-btn" @tap.stop="editOrder(order)">
-            <text class="edit-btn-text">✏️ 修改</text>
+          <view class="order-card__actions">
+            <view class="order-card__edit-btn" @tap.stop="editOrder(order)">
+              <text class="edit-btn-text">✏️ 修改</text>
+            </view>
+            <view class="order-card__delete-btn" @tap.stop="deleteOrder(order)">
+              <text class="delete-btn-text">🗑️ 删除</text>
+            </view>
           </view>
         </view>
         
@@ -21,13 +26,13 @@
         
         <view class="order-card__products">
           <view 
-            v-for="item in order.items" 
-            :key="item.productId"
+            v-for="item in getDisplayItems(order.items)" 
+            :key="item.key"
             class="product-row"
           >
-            <text class="product-row__name">{{ item.productName }}</text>
+            <text class="product-row__name">{{ item.name }}</text>
             <text class="product-row__quantity">x{{ item.quantity }}</text>
-            <text class="product-row__subtotal">¥{{ (item.quantity * item.price).toLocaleString() }}</text>
+            <text class="product-row__subtotal">¥{{ item.totalPrice.toLocaleString() }}</text>
           </view>
         </view>
         
@@ -57,10 +62,27 @@
                 {{ name }}<text v-if="idx < order.promotionNames.length - 1">、</text>
               </text>
             </view>
-            <view class="gifts-items">
+            <!-- 组合赠品显示 -->
+            <view v-if="order.groupGiftInfo" class="gifts-items">
               <text class="gifts-label">赠品：</text>
-              <text v-for="gift in order.giftItems" :key="gift.productId" class="gift-item">
-                {{ gift.productName }} x{{ gift.quantity }}
+              <text class="gift-group-name">{{ order.groupGiftInfo.groupName }}</text>
+              <text class="gift-group-quantity">x{{ order.groupGiftInfo.totalRequirement }}箱</text>
+            </view>
+            <!-- 单个产品赠品显示（检查是否有组合信息） -->
+            <view v-else class="gifts-items">
+              <text class="gifts-label">赠品：</text>
+              <text 
+                v-for="(gift, index) in order.giftItems" 
+                :key="gift.productId || gift.groupId || index"
+                class="gift-item"
+              >
+                <template v-if="gift.isGroup && gift.groupId">
+                  {{ getGroupName(gift.groupId) }} x{{ gift.quantity }}
+                </template>
+                <template v-else>
+                  {{ gift.productName }} x{{ gift.quantity }}
+                </template>
+                <text v-if="index < order.giftItems.length - 1">、</text>
               </text>
             </view>
           </view>
@@ -83,21 +105,28 @@
 import { ref, computed, onMounted } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { useAppStore } from '@/stores/app'
-import { orderApi } from '@/api'
-import type { Order } from '@/types'
+import { orderApi, productGroupApi } from '@/api'
+import type { Order, ProductGroup } from '@/types'
 import CustomTabBar from '@/components/CustomTabBar/index.vue'
 
 const store = useAppStore()
 const filterAgentId = ref<string>('')
 const orders = ref<Order[]>([])
 const loading = ref(true)
+const productGroups = ref<ProductGroup[]>([])
 
-onLoad((options) => {
+onLoad(async (options) => {
   if (options?.agentId) {
     filterAgentId.value = options.agentId
     uni.setNavigationBarTitle({
       title: '订单列表'
     })
+  }
+  // 加载产品组合数据
+  try {
+    productGroups.value = await productGroupApi.getAll()
+  } catch (error) {
+    console.error('加载产品组合失败:', error)
   }
   loadOrders()
 })
@@ -135,6 +164,48 @@ const filteredOrders = computed(() => {
   return orders.value
 })
 
+// 处理订单商品显示：按组合分组，如果item有groupId，只显示一次组合名称和组合数量
+const getDisplayItems = (items: any[]) => {
+  if (!items || items.length === 0) return []
+  
+  const displayMap = new Map<string, { key: string; name: string; quantity: number; totalPrice: number }>()
+  
+  items.forEach((item: any) => {
+    if (item.groupId && item.groupName && item.groupQuantity) {
+      // 组合商品：按groupId分组，只显示一次组合名称和组合数量
+      const key = `group-${item.groupId}`
+      if (!displayMap.has(key)) {
+        // 计算组合的总价格（组合中所有商品的价格总和）
+        const groupItems = items.filter((i: any) => i.groupId === item.groupId)
+        const totalPrice = groupItems.reduce((sum: number, i: any) => sum + (i.quantity || 0) * (i.price || 0), 0)
+        displayMap.set(key, {
+          key,
+          name: item.groupName,
+          quantity: item.groupQuantity,
+          totalPrice
+        })
+      }
+    } else {
+      // 单个商品：正常显示
+      const key = `product-${item.productId}`
+      displayMap.set(key, {
+        key,
+        name: item.productName,
+        quantity: item.quantity,
+        totalPrice: item.quantity * item.price
+      })
+    }
+  })
+  
+  return Array.from(displayMap.values())
+}
+
+// 获取组合名称
+const getGroupName = (groupId: string) => {
+  const group = productGroups.value.find(g => g.id === groupId)
+  return group?.name || `组合${groupId.slice(-4)}`
+}
+
 const formatTime = (time: string | Date) => {
   const d = new Date(time)
   const year = d.getFullYear()
@@ -147,7 +218,7 @@ const formatTime = (time: string | Date) => {
 
 const goToDetail = (orderId: string) => {
   uni.navigateTo({
-    url: `/pages/admin/orders/detail?id=${orderId}`
+    url: `/pages/super/orders/detail?id=${orderId}`
   })
 }
 
@@ -155,6 +226,49 @@ const editOrder = (order: Order) => {
   // 跳转到编辑页面
   uni.navigateTo({
     url: `/pages/super/orders/edit?id=${order.id}`
+  })
+}
+
+const deleteOrder = (order: Order) => {
+  // 确认删除
+  uni.showModal({
+    title: '确认删除',
+    content: `确定要删除订单 ${order.id.slice(-8).toUpperCase()} 吗？\n此操作不可恢复，如果订单已发货，将退回代理商余额。`,
+    confirmText: '删除',
+    confirmColor: '#FF4D4F',
+    cancelText: '取消',
+    success: async (res) => {
+      if (res.confirm) {
+        // 检查是否为管理员
+        if (!store.currentAdmin || (store.currentAdmin.role !== 'super_admin' && store.currentAdmin.role !== 'admin')) {
+          uni.showToast({ title: '需要管理员权限', icon: 'none' })
+          return
+        }
+        
+        try {
+          uni.showLoading({ title: '删除中...' })
+          
+          await orderApi.delete(
+            order.id,
+            store.currentAdmin.id,
+            store.currentAdmin.role
+          )
+          
+          uni.hideLoading()
+          uni.showToast({ title: '删除成功', icon: 'success' })
+          
+          // 刷新订单列表和代理商数据
+          await Promise.all([
+            loadOrders(),
+            store.loadAgents(),
+            store.loadTransactions()
+          ])
+        } catch (error: any) {
+          uni.hideLoading()
+          uni.showToast({ title: error.message || '删除失败', icon: 'none' })
+        }
+      }
+    }
   })
 }
 
@@ -195,11 +309,28 @@ onMounted(() => {
     color: $text-primary;
   }
   
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 12rpx;
+  }
+  
   &__edit-btn {
     padding: 8rpx 16rpx;
     background: rgba($warning-color, 0.1);
     border-radius: 8rpx;
     border: 1rpx solid rgba($warning-color, 0.3);
+    
+    &:active {
+      opacity: 0.8;
+    }
+  }
+  
+  &__delete-btn {
+    padding: 8rpx 16rpx;
+    background: rgba($danger-color, 0.1);
+    border-radius: 8rpx;
+    border: 1rpx solid rgba($danger-color, 0.3);
     
     &:active {
       opacity: 0.8;
@@ -254,6 +385,12 @@ onMounted(() => {
 .edit-btn-text {
   font-size: 24rpx;
   color: $warning-color;
+  font-weight: 500;
+}
+
+.delete-btn-text {
+  font-size: 24rpx;
+  color: $danger-color;
   font-weight: 500;
 }
 
@@ -348,6 +485,24 @@ onMounted(() => {
 
 .gift-item {
   color: $text-primary;
+  
+  &::after {
+    content: '、';
+  }
+  
+  &:last-child::after {
+    content: '';
+  }
+}
+
+.gift-group-name {
+  font-weight: 500;
+  color: $text-primary;
+}
+
+.gift-group-quantity {
+  color: $text-secondary;
+  margin-left: 8rpx;
 }
 
 .empty-state {

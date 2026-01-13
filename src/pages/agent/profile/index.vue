@@ -44,6 +44,13 @@
         <text class="menu-item__text">促销活动</text>
         <text class="menu-item__arrow">›</text>
       </view>
+      <view class="menu-item" @tap="goToGifts">
+        <view class="menu-item__icon">
+          <image src="/static/icons/gift.svg" class="menu-icon" mode="aspectFit" />
+        </view>
+        <text class="menu-item__text">搭赠情况</text>
+        <text class="menu-item__arrow">›</text>
+      </view>
       <view class="menu-item" @tap="goToMaterials">
         <view class="menu-item__icon">
           <image src="/static/icons/folder.svg" class="menu-icon" mode="aspectFit" />
@@ -152,6 +159,10 @@ const goToBalance = () => {
 
 const goToPromotions = () => {
   uni.navigateTo({ url: '/pages/agent/promotions/index' })
+}
+
+const goToGifts = () => {
+  uni.navigateTo({ url: '/pages/agent/gifts/index' })
 }
 
 const goToMaterials = () => {
